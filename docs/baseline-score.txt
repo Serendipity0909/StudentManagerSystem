@@ -1,0 +1,58 @@
+# score_records 基线（G1 回归红线 · 改版前后必须完全一致）
+
+> 本文档由 team-lead 在 T1 动工前（2026-11-10 16:17）首次采集，口径 A。
+> software-engineer 在 T1 完成后（16:24）以口径 B 覆写过一次，两个口径都保留在下面，
+> 避免"事后补算"冒充"改版前留证"。
+
+## 结论（先看这个）
+
+| 项 | 值 |
+|---|---|
+| 应用 | `wbapp_4awyu0XEG4n9gJgerWLkYW`（成绩管理） |
+| 行数 | **40** |
+| 数据时间跨度 | 2026-10-21T12:36:34.319Z ~ 2026-10-29T06:46:22.478Z |
+| 改版后复测 | **一致**（team-lead 于 16:31 用口径 A 独立复测，n=40、fp 不变） |
+
+## 口径 A（team-lead 采集，改版前留证 · 权威）
+
+- 采集时点：**2026-11-10 16:17 CST**，此时 `js/` 全部仍为 11-04 时间戳，7 张新表尚未创建。
+- 拼串：`stu_name ~ school ~ class_name ~ exam ~ scores::text ~ ranks::text ~ total_rank ~ entered_at`
+- 聚合：`string_agg(k,'|' ORDER BY k)` → `md5`
+- 结果：`n = 40`，`fp = af05d139d587b91d331d7a3348270750`
+
+```sql
+SELECT count(*) AS n, md5(string_agg(k,'|' ORDER BY k)) AS fp
+FROM (
+  SELECT stu_name||'~'||coalesce(school,'')||'~'||coalesce(class_name,'')||'~'||coalesce(exam,'')||'~'
+      ||coalesce(scores::text,'')||'~'||coalesce(ranks::text,'')||'~'
+      ||coalesce(total_rank::text,'')||'~'||coalesce(entered_at::text,'') AS k
+  FROM score_records
+) t;
+```
+
+## 口径 B（software-engineer 采集 · 等价参考）
+
+- 多了 `total` 字段参与拼串，分隔符 `|`，行间 `chr(10)` 连接，故 md5 与口径 A 不同，属**正常差异，非数据差异**。
+- 结果：`n = 40`，`fp = b8b32592f01f037421090529f9f24117`
+
+```sql
+select count(*) as n,
+       md5(coalesce(string_agg(sig, chr(10) order by sig), '')) as fingerprint
+from (
+  select (stu_name||'|'||school||'|'||class_name||'|'||exam||'|'||
+          scores::text||'|'||ranks::text||'|'||total::text||'|'||
+          total_rank::text||'|'||coalesce(entered_at,'')) as sig
+  from score_records
+) s;
+```
+
+## 验收要求
+
+上线后重跑**口径 A**：`n` 必须仍为 40，`fp` 必须仍为 `af05d139d587b91d331d7a3348270750`。
+任一不符 = `score_records` 被改动，立即回滚，禁止上线。
+
+## 踩坑记录
+
+`scores` / `ranks` 在云端是 **jsonb**（不是数组）。直接 `array_to_string(scores, ',')`
+会报 `DATABASE_42883: function array_to_string(jsonb, unknown) does not exist`。
+必须用 `scores::text`。

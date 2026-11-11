@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-store">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>学生成绩管理系统</title>
+<link rel="stylesheet" href="assets/style.css?v=202611111753">
+</head>
+<body>
+<div id="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <h1>学生管理系统</h1>
+      <p>STUDENT MANAGEMENT · 多人协作版</p>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="sidebar-foot">
+      <div id="store-state">云端数据库 · 读取中…</div>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <button class="icon-btn" id="btn-menu" aria-label="打开菜单">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <div>
+        <div class="mod-title" id="mod-title">概览</div>
+        <div class="mod-sub" id="mod-sub"></div>
+      </div>
+      <div class="spacer"></div>
+      <button class="ghost" id="btn-demo" title="生成一批示例数据用于试用">生成示例数据</button>
+      <button id="btn-backup">备份导出</button>
+      <button id="btn-restore">恢复导入</button>
+      <button class="danger" id="btn-clear">清空数据</button>
+      <input type="file" id="file-restore" accept=".json,application/json" style="display:none">
+      <div id="user-box" class="user-box"></div>
+    </div>
+    <div class="content" id="content"></div>
+  </div>
+</div>
+<div class="nav-mask" id="nav-mask"></div>
+<div id="modal-root"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<script src="js/core.js?v=202611111753"></script>
+<script src="js/db.js?v=202611111753"></script>
+<script src="js/perm.js?v=202611111753"></script>
+<script src="js/ui-kit.js?v=202611111753"></script>
+<script src="js/data-locator.js?v=202611111753"></script>
+<script src="js/locator.js?v=202611111753"></script>
+<script src="js/data-gradesize.js?v=202611111753"></script>
+<script src="js/gradesize.js?v=202611111753"></script>
+<script src="js/analysis.js?v=202611111753"></script>
+<script src="js/study-plan.js?v=202611111753"></script>
+<script src="js/charts.js?v=202611111753"></script>
+<script src="js/export.js?v=202611111753"></script>
+<script src="js/module-home.js?v=202611111753"></script>
+<script src="js/module-score.js?v=202611111753"></script>
+<script src="js/module-students.js?v=202611111753"></script>
+<script src="js/module-classes.js?v=202611111753"></script>
+<script src="js/module-customers.js?v=202611111753"></script>
+<script src="js/module-tasks.js?v=202611111753"></script>
+<script src="js/module-contracts.js?v=202611111753"></script>
+<script src="js/module-users.js?v=202611111753"></script>
+<script src="js/module-login.js?v=202611111753"></script>
+<script src="js/sync.js?v=202611111753"></script>
+<script src="js/app.js?v=202611111753"></script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+sequenceDiagram
+  autonumber
+  participant U as 管理员
+  participant MC as module-classes<br/>(班级详情 Tab①)
+  participant P as App.Perm
+  participant DB as App.DB.table('students')
+  participant SDK as workbuddy-cloud SDK
+  participant C as 云端 students 表
+  participant MS as module-students<br/>(学生管理列表)
+
+  U->>MC: 点「编辑」→ 弹窗修改联系方式为 13900000000
+  MC->>MC: 表单校验（唯一键 stu_name+school+grade 未变）
+  MC->>P: assertWrite('classes')
+  P->>P: Sync.canEdit() && isAdmin()
+  P-->>MC: true
+  MC->>DB: update(student_id, {phone, updated_at, last_editor})
+  DB->>SDK: from('students').update(patch).eq('id', …).select()
+  SDK->>C: UPDATE … RETURNING *
+  C-->>SDK: 更新后的整行
+  SDK-->>DB: {data:[row]}
+  DB->>DB: 覆盖 cache.students 对应行，emit('change')
+  DB->>DB: 失败分支：Toast + 入 retry 队列（改动不丢）
+  DB-->>MC: 写入成功
+  MC->>MC: App.render() 重绘班级学生表
+  U->>MS: 切换到「学生管理」
+  MS->>DB: list()（读同一份 cache.students）
+  DB-->>MS: 最新行（phone=13900000000）
+  MS-->>U: 列表显示新联系方式（同一份数据，非副本）

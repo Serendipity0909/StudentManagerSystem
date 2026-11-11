@@ -1,0 +1,152 @@
+classDiagram
+  class App_Sync {
+    +state
+    +isAdmin() bool
+    +canEdit() bool
+    +canView() bool
+    +me() string
+    +db() cloud
+    +boot()
+  }
+  class App_DB {
+    +cache Object
+    +define(name, opts)
+    +table(name) TableGateway
+    +refreshAll()
+    +flushRetry()
+    +onChange(fn)
+  }
+  class TableGateway {
+    +list() Array
+    +get(id) row
+    +insert(row) Promise
+    +update(id, patch) Promise
+    +remove(id) Promise
+    +findBy(uniqueVals) row
+  }
+  class App_Perm {
+    +allowed(mod) bool
+    +denied(mod) bool
+    +assertWrite(moduleId) bool
+    +forbiddenCard(mod) string
+  }
+  class App_UI {
+    +round2(n) number
+    +money(n) string
+    +pct(num, den) string
+    +periodRange(kind, now) Range
+  }
+  class Store {
+    +data
+    +save(silent)
+  }
+  class Score {
+    +stat(rows, col)
+    +rankByRate(pool, ref)
+    +totalRate(rec)
+  }
+
+  class students {
+    +id uuid
+    +stu_name text
+    +school text
+    +grade text
+    +phone text
+    +subjects jsonb
+    +teachers jsonb
+    +created_at timestamptz
+    +updated_at timestamptz
+    +last_editor text
+  }
+  students : unique(stu_name, school, grade)
+
+  class classes {
+    +id uuid
+    +class_name text
+    +teachers jsonb
+    +room text
+    +schedules jsonb
+    +grade text
+    +subject text
+    +created_at timestamptz
+  }
+  classes : unique(class_name)
+
+  class class_members {
+    +id uuid
+    +class_id uuid
+    +student_id uuid
+    +joined_at timestamptz
+  }
+  class_members : unique(class_id, student_id)
+
+  class customers {
+    +id uuid
+    +stu_name text
+    +phone text
+    +resource_type text
+    +created_at timestamptz
+    +visited bool
+    +visit_at timestamptz
+    +paid bool
+    +paid_at timestamptz
+    +paid_amount numeric
+    +referral_name text
+    +referral_amount numeric
+    +note_* text
+  }
+  class daily_tasks {
+    +id uuid
+    +title text
+    +priority text
+    +due_at timestamptz
+    +status text
+    +done_at timestamptz
+  }
+  class contract_prices {
+    +id uuid
+    +year int
+    +grade text
+    +stage text
+    +plan text
+    +unit_price numeric
+    +sessions int
+  }
+  contract_prices : unique(year, grade, stage, plan)
+
+  class contracts {
+    +id uuid
+    +stu_name text
+    +grade text
+    +year int
+    +plan text
+    +items jsonb
+    +original_amount numeric
+    +discount_type text
+    +payable_amount numeric
+    +balance_remain numeric
+  }
+  contracts : unique(stu_name, grade)
+
+  class score_records {
+    <<existing 不动>>
+    +stu_name text
+    +school text
+    +class_name text
+    +exam text
+    +scores int[]
+    +entered_at timestamptz
+  }
+
+  App_Sync ..> App_DB : 暴露 cloud 实例 db()
+  App_DB --> TableGateway : table(name)
+  TableGateway ..> App_Perm : mutation 前守卫
+  App_Perm ..> App_Sync : isAdmin/canEdit
+  class_members }o--|| students : student_id（逻辑引用，无FK）
+  class_members }o--|| classes : class_id（逻辑引用，无FK）
+  students ..> score_records : 弱关联 stu_name+school（只读）
+  contracts ..> contract_prices : 签订时快照（逻辑引用）
+  contracts ..> students : 弱关联（仅姓名联想）
+  customers ..> students : 零关联（互不互通）
+  App_DB ..> Store : 不触碰（score_records 归 sync.js）
+  Score <.. Store : 成绩算法与内存
