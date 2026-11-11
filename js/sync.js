@@ -203,7 +203,7 @@
 
   /**
    * 手机号归一化（与 SDK 内部 normalizePhone 完全一致）。
-   * 云端鉴权接口只接受 E.164 格式：「+86 18772667782」（国家码后带一个空格），
+   * 云端鉴权接口只接受 E.164 格式：「+86 13800000000」（国家码后带一个空格），
    * 直接传 11 位裸号码会被服务端的 proto 校验拒掉（400 invalid_argument）。
    */
   function normalizePhone(p) {
@@ -232,7 +232,7 @@
    * ② token + 新密码 → 真正写入密码（与 SDK resetPasswordForEmail 对 email 的用法同构）
    *
    * 注意 /v1/reset 的字段名是 phone_number（不是 phone），且必须是 E.164
-   * 格式「+86 18772667782」。用 phone 或 11 位裸号码时，服务端收不到号码，
+   * 格式「+86 13800000000」。用 phone 或 11 位裸号码时，服务端收不到号码，
    * 会在 proto 校验阶段直接 400：error_description = "email or phone number is empty"。
    * 这也是「/v1/verification/verify 返回 200、紧接着 /v1/reset 报 HTTP 400」的原因。
    */
