@@ -56,3 +56,110 @@ from (
 `scores` / `ranks` 在云端是 **jsonb**（不是数组）。直接 `array_to_string(scores, ',')`
 会报 `DATABASE_42883: function array_to_string(jsonb, unknown) does not exist`。
 必须用 `scores::text`。
+
+---
+
+# v3 新基线（2026-11-20 · 考试年月改造 · 本章为当前权威基准）
+
+> 采集人：team-lead（主理人） | 通道：MCP `db_exec_sql`（只读） | 应用：`wbapp_4awyu0XEG4n9gJgerWLkYW`
+> **上面「口径 A / 口径 B（40 行）」两节保留为历史留证，标为「历史留证，非本次基准」，不得删除、不得覆写。**
+> 2026-11-19 用户正常新增 2 条成绩（id=779「11月段考」、id=780「10月段考」补录），线上由 40 行变为 **42 行**，
+> 属正常录入，非数据被篡改。v3 验收以本章为准。
+
+## 结论（先看这个）
+
+| 项 | 值 |
+|---|---|
+| 行数 | **42** |
+| **口径 A（8 字段，G1 跨版本权威基准）** | `n=42`、`fp=d08aab5b7f0aa8028873f67bd0248859` |
+| **口径 C（全 16 列，V-H1/V-H2 强制补充）** | `n=42`、`fp=4120b89db2e0df7be40c564f7e41b70b` |
+| 三列专项 `entered_at/updated_at/last_editor` | `fp3=120df1f4d7924b7dd1adeaff47beb3d5` |
+| 触发器 | `pg_trigger` 返回 `[]`（无自定义触发器）→ 定点 `SET exam_ym` 不会连带改写 `updated_at` |
+| 列级权限 | 无列级 REVOKE；新增列自动继承表级 GRANT（authenticated 具 INSERT/UPDATE/SELECT） |
+| RLS | 4 条策略齐全：`score_read_team / score_insert_team / score_update_team / score_delete_team`；表 `RLSOn=false`（既存状态，v3 不改开关） |
+| 唯一索引 | `score_records_unique_stu (stu_name, school, class_name, exam)` —— v3 零改动 |
+| 时区 | `PRC`（`updated_at::text` 形如 `2026-10-21 20:36:35.129+08`，复算 fp 必须同环境） |
+
+**权威关系**：口径 A 与口径 C **并用，不是二选一**。
+- 口径 A 的拼串**不含 `exam_ym`**，因此 `ADD COLUMN` 与定点回填前后 `n/fp` 逐字节不变，是「既有 8 列零改写」的强证明，也是 G1 跨版本权威基准。
+- 口径 C 覆盖**全部 16 个既有列**（含 `updated_at / last_editor / owner_* / created_at / total`），因口径 A 不含这两列，单独无法证明 V-H2，故为强制补充。
+- 再加 `id, entered_at, updated_at, last_editor` 三列逐行 diff（对 `docs/backup-pre-v3.json`），构成 V-H2 完整证据链。
+
+## 口径 A（沿用 v2，G1 权威）
+
+```sql
+SELECT count(*) AS n, md5(string_agg(k,'|' ORDER BY k)) AS fp
+FROM (
+  SELECT stu_name||'~'||coalesce(school,'')||'~'||coalesce(class_name,'')||'~'||coalesce(exam,'')||'~'
+      ||coalesce(scores::text,'')||'~'||coalesce(ranks::text,'')||'~'
+      ||coalesce(total_rank::text,'')||'~'||coalesce(entered_at::text,'') AS k
+  FROM score_records
+) t;
+-- n=42  fp=d08aab5b7f0aa8028873f67bd0248859
+```
+
+## 口径 C（v3 强制补充：全 16 列，显式排除新增列 exam_ym）
+
+> ⚠ **规范形式唯一**：以下 `concat_ws('|', ...)` + `string_agg(t, E'\n' ORDER BY t)` 为本基线唯一认可写法，
+> 结果 `4120b89db2e0df7be40c564f7e41b70b`。任何改用 `concat_ws('~')` / `string_agg(k,'|')` 的变体
+> 会得到另一个 md5（实测 `e921c0705b192253d4ebaa31d73518ed`），**不同拼串口径的 md5 不可互比**，
+> 照抄变体再与本值比对必然假失败并误触发回滚。
+
+```sql
+SELECT count(*) AS n, md5(string_agg(t, E'\n' ORDER BY t)) AS fp
+FROM (
+  SELECT concat_ws('|', id::text, coalesce(owner_id,''), coalesce(owner_name,''),
+                        coalesce(last_editor,''), coalesce(rec_id,''), coalesce(stu_name,''),
+                        coalesce(school,''), coalesce(class_name,''), coalesce(exam,''),
+                        coalesce(scores::text,''), coalesce(ranks::text,''),
+                        coalesce(total::text,''), coalesce(total_rank::text,''),
+                        coalesce(entered_at,''), coalesce(created_at::text,''),
+                        coalesce(updated_at::text,'')) AS t
+  FROM score_records
+) s;
+-- n=42  fp=4120b89db2e0df7be40c564f7e41b70b
+```
+
+## 三列专项（V-H2）
+
+```sql
+SELECT md5(string_agg(t, E'\n' ORDER BY id)) AS fp3 FROM (
+  SELECT id, concat_ws('|', id::text, coalesce(entered_at,''),
+                            coalesce(updated_at::text,''), coalesce(last_editor,'')) AS t
+  FROM score_records
+) s;
+-- fp3=120df1f4d7924b7dd1adeaff47beb3d5
+-- 与 docs/backup-pre-v3.json 的 42 行 three_cols 按同式复算结果完全一致
+```
+
+## 回填结果与验收（V3-1 已执行，2026-11-20）
+
+执行顺序：`ALTER TABLE score_records ADD COLUMN IF NOT EXISTS exam_ym text` →
+事务内 CTE 定点 `SET exam_ym`（`WHERE exam_ym IS NULL`，`exam` 抓 `N月` + `entered_at` 年份，跨年补录修正 `m > em+1 → y−1`）。
+
+| 验收 | 期望 | 实测 |
+|---|---|---|
+| V-H1 行数 | 42 | **42** ✓ |
+| V-H1 口径 A | `d08aab5b7f0aa8028873f67bd0248859` | **逐字节一致** ✓ |
+| V-H1 口径 C | `4120b89db2e0df7be40c564f7e41b70b` | **逐字节一致** ✓ |
+| V-H2 三列 diff | 与 backup 一致 | **一致** ✓ |
+| 非法年月 | 0 | **0** ✓ |
+| `exam_ym` 分布 | `2026-10=41`、`2026-11=1` | **精确一致** ✓ |
+| 唯一索引 / RLS / 触发器 | 不变 | **2 / 4 / 0 均不变** ✓ |
+| 回填后列数 | 17（16 + `exam_ym`） | **17** ✓ |
+
+**结论：V3-1 通过，G1 红线全过，保留变更，无需回滚。**
+
+## 回滚方案
+
+- 事务内任一断言失败 → `ROLLBACK`（Postgres 的 `ALTER TABLE` 是事务性的）。
+- 已提交、前端发布前发现 → `ALTER TABLE score_records DROP COLUMN exam_ym;`（唯一改动就是这一列，删除即精确还原；既有列从未被写）。
+- 前端发布后 → 不再 DROP（用户可能已录入新年月），走前向修复；整库回退用 `docs/backup-pre-v3.json` 经 SQL 定点还原，**禁止**用 `restoreJSON` 全列 upsert（会改写 `updated_at/last_editor`）。
+
+## v3 踩坑补记
+
+- 指纹**绝不能包含 `exam_ym`**，否则「基线无列 / 改造后有列」必然假报警。
+- 回填只能 `SET exam_ym` 单列，禁止经 `sync.js toRow` 全列 upsert。
+- 不同拼串口径的 md5 不可互比（口径 A / B / C 各自独立；口径 C 还存在易混淆的变体，见上方 ⚠）。
+- `scores` / `ranks` 是 **jsonb**，必须 `::text`，不能用 `array_to_string`。
+- 复算 fp 依赖 `TimeZone=PRC`；换成 UTC 会让 `updated_at::text` 变值。

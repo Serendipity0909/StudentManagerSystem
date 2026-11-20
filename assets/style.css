@@ -483,3 +483,26 @@ input.ro:focus{box-shadow:none;border-color:var(--line2)}
 .rate-bar .rate-avg{position:absolute;top:-4px;bottom:-4px;width:0;
   border-left:2px solid var(--blue)}
 @media print{.rate-bar .rate-base,.rate-bar .rate-avg{border-left-style:solid}}
+
+/* =========================================================
+ * v3 考试年月：窗体黄条软提示 / 总表 chip 两态 / 新列宽
+ * 只新增类，不改动既有卡片式样式
+ * ========================================================= */
+/* 未来年月黄条软提示（只提示，不拦截提交） */
+.ym-future-hint{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;
+  background:var(--amber-bg);border-left:4px solid var(--amber);
+  border-radius:0 8px 8px 0;padding:8px 12px;margin:10px 0 0;
+  font-size:12.5px;color:#8a6320;line-height:1.7}
+.ym-future-hint b{color:var(--amber)}
+/* 缺年月：占位行 + 「使用当前年月」按钮 */
+.ym-missing-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  margin:10px 0 0;font-size:12.5px}
+.ym-missing-row button{padding:3px 10px;font-size:12px}
+/* 总表「考试年月」列：合法 / 未标注 / 异常 三态 */
+.ym-col{min-width:96px;white-space:nowrap}
+.ym-ok{color:var(--ink2);font-size:12px;font-variant-numeric:tabular-nums}
+.chip.ch-ym-missing{background:#f1f4f3;color:var(--ink3);font-weight:500}
+.chip.ch-ym-invalid{background:var(--amber-bg);color:var(--amber)}
+/* 查询分析筛选栏灰字 */
+.ym-filter-hint{margin-top:8px;font-size:11.5px}
+@media print{.ym-missing-row,.ym-future-hint{display:none!important}}

@@ -104,7 +104,8 @@
 
   /**
    * 双轴折线图：左轴=成绩（红实线圆点），右轴=排名（蓝色虚线方点，反向刻度）
-   * opt: { title, labels:[], score:[], rank:[], scoreLabel, rankLabel }
+   * opt: { title, labels:[], labelTitles?:[], score:[], rank:[], scoreLabel, rankLabel }
+   *      labels 仍为字符串数组；labelTitles 可选，同为字符串数组，作为 x 轴 <title> 内容
    */
   function dualLineChart(opt) {
     var W = opt.width || 900, H = opt.height || 380;
@@ -195,9 +196,15 @@
       svg.appendChild(el('text', { x: xs(id2), y: yr(rvv) + 16, 'text-anchor': 'middle', 'font-size': 10, fill: '#4472c4' }, String(rvv)));
     }
 
-    // X 轴标签
+    // X 轴标签：可选 opt.labelTitles —— 每个 <text> 下挂一个 <title>，
+    // 供鼠标悬停查看完整「YYYY-MM · 考试原文」；不传时行为与原来完全一致，API 向后兼容。
+    var labelTitles = opt.labelTitles;
     for (i = 0; i < n; i++) {
-      svg.appendChild(el('text', Object.assign({ x: xs(i), y: pt + ph + 18, 'text-anchor': 'middle' }, axisText(10.5)), labels[i]));
+      var t = el('text', Object.assign({ x: xs(i), y: pt + ph + 18, 'text-anchor': 'middle' }, axisText(10.5)), labels[i]);
+      if (labelTitles && labelTitles[i] !== undefined && labelTitles[i] !== null) {
+        t.appendChild(el('title', {}, App.U.esc(String(labelTitles[i]))));
+      }
+      svg.appendChild(t);
     }
 
     // 图例（无排名数据时只画成绩图例并居中）

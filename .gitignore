@@ -1,0 +1,7 @@
+# v3 回滚底稿：含内部 last_editor 真实姓名与应用标识，仅供本地复算 fp3 / V-H2 使用。
+# 本仓库为公开仓库，故这两个文件不入库；线上发布目录有访问码保护，仍按原形态保留。
+docs/backup-pre-v3.json
+docs/v3-postflight-snapshot.json
+
+# 本地 WorkBuddy 应用配置（含应用 ID / 访问配置），不入库
+.workbuddy/

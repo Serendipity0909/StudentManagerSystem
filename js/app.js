@@ -221,6 +221,15 @@
   function genDemo() {
     var schools = ['城东中学'], classes = ['初三(1)班', '初三(2)班'];
     var exams = ['第一次月考', '期中考试', '期末考试'];
+    /* V3-2：三场示例按本地当前年月往前 2 / 1 / 0 月递增（R3-2 裁决），
+       用 Date(y, m - back, 1) 让跨年自动回退年份，避免手算月份出现 0 / 13。
+       rec.ts 生成逻辑保持原样，年月只影响新的排序键。 */
+    var nowYm = new Date();
+    var demoYm = exams.map(function (unused, idx) {
+      var back = exams.length - 1 - idx;
+      var d = new Date(nowYm.getFullYear(), nowYm.getMonth() - back, 1);
+      return Score.makeExamYm(d.getFullYear(), d.getMonth() + 1);
+    });
     var names = ['陈思远', '林嘉悦', '王一鸣', '赵梓涵', '刘泽楷', '孙雨桐', '周晨曦', '吴博文', '郑雅静', '黄俊杰'];
     var base = [88, 92, 76, 84, 69, 90, 81, 73, 86, 78];
     var i, j, k, r, bump;
@@ -232,6 +241,7 @@
         rec.school = schools[0];
         rec.cls = classes[i % 2];
         rec.exam = exams[j];
+        rec.examYm = demoYm[j];
         bump = j * 2 + (i % 3) - 2;
         for (k = 0; k < 9; k++) {
           // 百分制底数先算出水平，再按该科满分换算（语数英 150，其余 100），

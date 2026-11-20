@@ -1,0 +1,76 @@
+# score_records v3 采集底稿 / 明细附件（非权威基准）
+
+> 采集人：team-lead（主理人） | 时点：2026-11-20 10:1x CST | 通道：MCP db_exec_sql（只读）
+> 应用：`wbapp_4awyu0XEG4n9gJgerWLkYW`
+>
+> ⚠ **口径降级说明（team-lead 2026-11-20 裁决）**：本文件**不是** v3 权威基准，仅作
+> 「42 行采集时点的明细底稿 / 附件」保留，供追溯采集过程与逐行数据。
+> **v3 唯一权威基线 = `docs/baseline-score.txt` 末尾的「v3 新基线」章节**（口径 A + 口径 C 并用，
+> 并保留 v2 的 40 行 A/B 历史留证）。凡验收、G1 红线、QA 判定一律引用主文档，不引用本文件。
+> 本文件保留不删，`baseline-score.txt` 亦不覆写（40 行 v2 留证保留）。
+
+## 为什么重新采集
+
+`docs/baseline-score.txt` 是 2026-11-10 采集的 **40 行**快照。2026-11-19 用户正常新增 2 条成绩
+（廖琦「11月段考」id=779、廖琦「10月段考」id=780 补录），线上变为 **42 行**。
+n 与 fp 的变化是用户正常录入导致的，不是数据被篡改。v3 验收必须以本文件为准。
+
+## 结论（先看这个）
+
+| 项 | 值 |
+|---|---|
+| 行数 | **42** |
+| 口径 A（8 字段，与 v2 同口径） | `n=42`、`fp=d08aab5b7f0aa8028873f67bd0248859` |
+| 口径 C（**全 16 列**，V-H1/V-H2 强制补充） | `n=42`、`fp=4120b89db2e0df7be40c564f7e41b70b` |
+| 触发器 | `pg_trigger` 查询返回 **空**（无自定义触发器）→ 定点 UPDATE 不会连带改写 updated_at |
+| RLS | 4 条策略齐全：score_{read,insert,update,delete}_team |
+| 唯一索引 | `score_records_unique_stu (stu_name, school, class_name, exam)` —— v3 零改动 |
+
+## 口径 A（沿用 v2，用于跨版本对照）
+
+```sql
+SELECT count(*) AS n, md5(string_agg(k,'|' ORDER BY k)) AS fp
+FROM (
+  SELECT stu_name||'~'||coalesce(school,'')||'~'||coalesce(class_name,'')||'~'||coalesce(exam,'')||'~'
+      ||coalesce(scores::text,'')||'~'||coalesce(ranks::text,'')||'~'
+      ||coalesce(total_rank::text,'')||'~'||coalesce(entered_at::text,'') AS k
+  FROM score_records
+) t;
+```
+
+## 口径 C（强制补充：覆盖全部既有 16 列，显式排除新增列 exam_ym）
+
+```sql
+SELECT count(*) AS n, md5(string_agg(t, E'\n' ORDER BY t)) AS fp
+FROM (
+  SELECT concat_ws('|', id::text, coalesce(owner_id,''), coalesce(owner_name,''),
+                        coalesce(last_editor,''), coalesce(rec_id,''), coalesce(stu_name,''),
+                        coalesce(school,''), coalesce(class_name,''), coalesce(exam,''),
+                        coalesce(scores::text,''), coalesce(ranks::text,''),
+                        coalesce(total::text,''), coalesce(total_rank::text,''),
+                        coalesce(entered_at,''), coalesce(created_at::text,''),
+                        coalesce(updated_at::text,'')) AS t
+  FROM score_records
+) s;
+```
+
+## 验收要求（V-H1 / V-H2）
+
+改造完成（ADD COLUMN + 定点回填）后重跑口径 A 与口径 C：
+
+1. `n` 必须仍为 **42**
+2. 口径 A `fp` 必须仍为 `d08aab5b7f0aa8028873f67bd0248859`
+3. 口径 C `fp` 必须仍为 `4120b89db2e0df7be40c564f7e41b70b`
+4. `entered_at / updated_at / last_editor` 三列逐行与 `backup-pre-v3.json` 相等（V-H2）
+5. `exam_ym` 分布：`2026-10` = 41 条、`2026-11` = 1 条
+6. 唯一索引定义不变、RLS 4 条策略不变
+
+**任一不符 = 既有列被改写，立即回滚，禁止上线。**
+（备份双留证：`docs/backup-pre-v3.json` 逐行 16 列 + 本文件指纹。）
+
+## 踩坑记录
+
+- `scores` / `ranks` 是 **jsonb**，必须用 `::text`，不能用 `array_to_string`。
+- 指纹**绝不能包含 `exam_ym`**，否则「基线无列 / 改造后有列」必然假报警。
+- 回填只能 `SET exam_ym` 单列，禁止经 `sync.js toRow` 全列 upsert（会改写 updated_at/last_editor）。
+- 不同拼串口径的 md5 不可互比（口径 A / B / C 各自独立）。

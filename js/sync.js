@@ -60,7 +60,13 @@
    * 只改学校/班级/考试时分数没动，指纹里没有键字段就会判定「无变化」而不推送。
    */
   function fp(r) {
-    return JSON.stringify([r.name, r.school, r.cls, r.exam, r.scores, r.ranks, Number(r.totalRank) || 0]);
+    /* V3-2：年月必须进指纹，否则「只改考试年月」会被判为无变化而不推送云端（V-E7）。
+       null / undefined 一律用 '' 占位（判据 == null），保证数组长度固定、不丢位，
+       也防止裸云端行直接进内存时指纹里出现字符串 'null'。 */
+    return JSON.stringify([
+      r.name, r.school, r.cls, r.exam, r.scores, r.ranks, Number(r.totalRank) || 0,
+      r.examYm == null ? '' : String(r.examYm)
+    ]);
   }
   /**
    * 记录的同步标识：有云端主键就一律用主键。
@@ -75,7 +81,9 @@
       name: r.name, school: r.school, cls: r.cls, exam: r.exam,
       scores: (r.scores || []).slice(), ranks: (r.ranks || []).slice(),
       totalRank: Number(r.totalRank) || 0,
-      ts: r.ts, mod: r.mod, _cid: r._cid || null, _by: r._by || ''
+      ts: r.ts, mod: r.mod, _cid: r._cid || null, _by: r._by || '',
+      /* V3-2：23505 冲突回滚时年月必须一起还原；undefined 语义保留，不落 '' */
+      examYm: r.examYm
     };
   }
   /** 把内存记录还原到快照（保留内存 id，界面上仍是同一行） */
@@ -84,6 +92,8 @@
     r.scores = s.scores.slice(); r.ranks = s.ranks.slice();
     r.totalRank = s.totalRank; r.ts = s.ts; r.mod = s.mod;
     r._cid = s._cid; r._by = s._by;
+    /* V3-2：快照里的 undefined 原样写回，不会被旧值顶掉 */
+    r.examYm = s.examYm;
   }
   function rowKey(row) {
     return [row.stu_name, row.school, row.class_name, row.exam].join(SEP);
@@ -114,7 +124,7 @@
   function toRow(r) {
     var s = [], rk = [], i;
     for (i = 0; i < App.K.NUM_SUBJECTS; i++) { s.push(Number(r.scores[i]) || 0); rk.push(Number(r.ranks[i]) || 0); }
-    return {
+    var row = {
       rec_id: r.id || '',
       stu_name: r.name, school: r.school, class_name: r.cls, exam: r.exam,
       scores: s, ranks: rk,
@@ -124,6 +134,13 @@
       updated_at: new Date().toISOString(),
       last_editor: me()
     };
+    /* V3-2：只在内存确实带年月时才写 exam_ym（判据 r.examYm != null，
+       即 null / undefined 都省略）。旧 JSON 备份恢复出的记录没有该字段，条件带上可保证
+       PostgREST update 不碰这一列，云端已回填的年月不会被清空（V-F3）；也防止将来有人把
+       裸云端行（exam_ym: null）直接塞进内存时写出 exam_ym: null 清空云端。
+       禁止无条件写 exam_ym: ''。updated_at / last_editor 的既有刷新行为不变。 */
+    if (r.examYm != null) row.exam_ym = r.examYm;
+    return row;
   }
 
   function fromRow(row) {
@@ -139,6 +156,8 @@
       // 云端主键：保存时必须按它 update，改了键字段也不会插出第二条
       _cid: (row.id === undefined || row.id === null) ? null : row.id,
       name: row.stu_name, school: row.school, cls: row.class_name, exam: row.exam,
+      /* V3-2：云端 exam_ym → 内存 examYm 的唯一映射点；旧行缺列 / 脏值原样进内存 */
+      examYm: (row.exam_ym == null) ? undefined : String(row.exam_ym),
       scores: s, ranks: rk,
       totalRank: Number(row.total_rank) || 0,
       ts: row.entered_at || row.created_at,

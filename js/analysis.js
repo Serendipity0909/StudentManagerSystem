@@ -5,7 +5,7 @@
  *   target      : 本次要分析的成绩记录
  *   classRows   : 同校同班同考试的全部记录
  *   gradeRows   : 同校同届同考试的全部记录（跨班级）
- *   studentRows : 该生历次考试记录（已按考试先后排序）
+ *   studentRows : 该生历次考试记录（已由调用方用 Score.sortByExam 按考试年月排好；本函数不自行排序）
  *   gradeSize   : App.GradeSize.estimate(...) 的结果（可空）
  *   track       : '物理类' / '历史类' / ''
  *
@@ -211,7 +211,11 @@
     var strengths = goodList.map(function (s) { return s.name; });
     var weaknesses = weakList.map(function (s) { return s.name; });
 
-    /* ---------- 趋势（总分按得分率口径，跨考试可比） ---------- */
+    /* ---------- 趋势（总分按得分率口径，跨考试可比） ----------
+     * V3-4 / ARCH #14：exams 直接来自传入的 studentRows（有序序列），本函数不自行排序、
+     * 不新增任何按 ts / U.zh 的排序。exams[0] = 首考、exams[exams.length-1] = 最近考试，
+     * 首末比较 / totalDelta / rateDelta / rankDelta / bySubject.dir / trend.exams / buildSummary
+     * 全部依赖该序列，算法与阈值零改动（V-A1 / V-B1 / V-B2 / V-C2）。 */
     var exams = studentRows.map(function (r) {
       var f = Score.fields(r);
       var t = Score.total(r);

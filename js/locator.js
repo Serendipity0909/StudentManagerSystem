@@ -223,7 +223,10 @@
         '」，本次到下次考试之间把总分再往上推一点即可达成。');
     }
 
-    /* 2）历次排名参照：用已有记录算进步幅度，判断目标是否现实 */
+    /* 2）历次排名参照：用已有记录算进步幅度，判断目标是否现实
+     * V3-4 / ARCH #15：studentRows 已由调用方用 Score.sortByExam 按考试年月排好，
+     * 这里仍取有序序列倒数第二项作为「上次」（原 for (i = length-2; ...) 语义不变），
+     * prev.exam 文案不变；本函数不自行排序、信任传入序列（V-A1 / V-C2）。 */
     var prevRank = 0, prev = null;
     for (var i = studentRows.length - 2; i >= 0; i--) {
       var r = Number(studentRows[i].totalRank) || 0;
@@ -261,6 +264,8 @@
       var parts = [];
       for (var w = 0; w < weak.length; w++) {
         var it = weak[w];
+        /* V3-4 / V-C3：Score.history 算法零改动（±2 / ±5 阈值不变），
+         * 仅消费调用方按年月排好的有序 studentRows，相邻比较即年月相邻。 */
         var trend = Score.history(studentRows, it.idx, it.score);
         var adv = Score.advice(it.idx, it.score, it.diff, trend.desc);
         if (adv.indexOf(it.name) === 0) adv = adv.slice(it.name.length);   // 去掉重复出现的科目名

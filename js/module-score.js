@@ -76,6 +76,71 @@
     var body = document.createElement('div');
     var names = Object.keys(Store.data.records.reduce(function (a, r) { a[r.name] = 1; return a; }, {})).sort(U.zh);
 
+    /* ---------- 考试年月：两个下拉 + 编辑回显（V3-3） ---------- */
+    var curYm = Score.defaultExamYm();                     // 本地当前年月 'YYYY-MM'
+    var curY = Number(curYm.slice(0, 4));
+    var curM = Number(curYm.slice(5, 7));
+    var yearList = [];                                     // 当前本地年 −5 ~ +1，7 项升序
+    var yi;
+    for (yi = curY - 5; yi <= curY + 1; yi++) yearList.push(yi);
+    var monthList = [];
+    for (var mi = 1; mi <= 12; mi++) monthList.push(mi < 10 ? '0' + mi : String(mi));
+
+    /* 编辑态：ok=回显 / invalid=保留脏值 / missing=占位不自动写入 / new=默认当前年月 */
+    var ymInfo = existing ? Score.examYmOf(existing) : null;
+    var ymState = ymInfo ? ymInfo.state : 'new';
+    var RAW_KEEP = '__KEEP_RAW_YM__';
+    var keepRawExamYm = false;
+    var selYear = '', selMonth = '';
+
+    if (ymState === 'new') {
+      selYear = String(curY);
+      selMonth = monthList[curM - 1];
+    } else if (ymState === 'ok') {
+      selYear = String(ymInfo.y);
+      selMonth = (Number(ymInfo.m) < 10 ? '0' : '') + Number(ymInfo.m);
+      if (yearList.indexOf(Number(ymInfo.y)) < 0) {
+        yearList.push(Number(ymInfo.y));                  // 范围外年份：下拉自动扩展
+        yearList.sort(function (a, b) { return a - b; });
+      }
+    } else if (ymState === 'invalid') {
+      var dirtyYear = Number(String(ymInfo.raw).slice(0, 4));
+      if (isFinite(dirtyYear) && dirtyYear >= 1 && yearList.indexOf(dirtyYear) < 0) {
+        yearList.push(dirtyYear);                         // 脏值里可辨认的年份也加进下拉
+        yearList.sort(function (a, b) { return a - b; });
+      }
+      selYear = RAW_KEEP;
+      selMonth = '';
+      keepRawExamYm = true;
+    } else {
+      selYear = '';
+      selMonth = '';
+    }
+
+    function yearOptsHTML() {
+      var h = '';
+      if (ymState === 'missing') {
+        h += '<option value=""' + (selYear === '' ? ' selected' : '') + '>请选择</option>';
+      }
+      if (ymState === 'invalid') {
+        h += '<option value="' + RAW_KEEP + '" selected>' + U.esc('保留原值（' + String(ymInfo.raw) + '）') + '</option>';
+      }
+      yearList.forEach(function (y) {
+        h += '<option value="' + y + '"' + (String(y) === selYear ? ' selected' : '') + '>' + y + ' 年</option>';
+      });
+      return h;
+    }
+    function monthOptsHTML() {
+      var h = '';
+      if (ymState === 'missing' || ymState === 'invalid') {
+        h += '<option value=""' + (selMonth === '' ? ' selected' : '') + '>请选择</option>';
+      }
+      monthList.forEach(function (m) {
+        h += '<option value="' + m + '"' + (m === selMonth ? ' selected' : '') + '>' + Number(m) + ' 月</option>';
+      });
+      return h;
+    }
+
     body.innerHTML =
       '<div id="live-hint" class="live-hint">已计入 0 科　·　满分 0　·　及格线 0　·　当前得分率 0%</div>' +
       '<div class="form-grid">' +
@@ -86,6 +151,13 @@
       '  <label class="f">考试名称 *<input name="exam" list="ex" autocomplete="off"><datalist id="ex">' +
       Object.keys(Store.data.records.reduce(function (a, r) { a[r.exam] = 1; return a; }, {})).sort(U.zh)
         .map(function (n) { return '<option value="' + U.esc(n) + '">'; }).join('') + '</datalist></label>' +
+      '  <label class="f">考试年份 *<select name="examYear">' + yearOptsHTML() + '</select></label>' +
+      '  <label class="f">考试月份 *<select name="examMonth">' + monthOptsHTML() + '</select></label>' +
+      '</div>' +
+      '<div id="ym-future-hint" class="ym-future-hint" style="display:none"></div>' +
+      '<div id="ym-missing-row" class="ym-missing-row" style="display:none">' +
+      '  <span class="muted">该记录尚未标注考试年月，请手动选择；也可</span>' +
+      '  <button type="button" id="ym-use-current" class="ghost">使用当前年月</button>' +
       '</div>' +
       '<div class="subj-head"><div>科目</div><div style="text-align:center">成绩</div><div style="text-align:center">单科排名</div></div>' +
       '<div id="subj-rows" style="max-height:290px;overflow:auto">' +
@@ -108,6 +180,42 @@
       '<div id="form-err"></div>';
 
     var totalRankInput = body.querySelector('[name=totalRank]');
+
+    /* ---------- 考试年月：未来年月软提示 / 缺年月「使用当前年月」 ---------- */
+    var selY = body.querySelector('[name=examYear]');
+    var selM = body.querySelector('[name=examMonth]');
+    var futureBox = body.querySelector('#ym-future-hint');
+    function paintYmFuture() {
+      if (!futureBox || !selY || !selM) return;
+      var ym = Score.makeExamYm(selY.value, selM.value);
+      if (ym && ym > curYm) {
+        futureBox.style.display = '';
+        futureBox.innerHTML = '<b>提示：</b>所选考试年月 ' + U.esc(ym) + ' 晚于当前年月 ' +
+          U.esc(curYm) + '，请确认是否为预录入；这是软提示，不影响保存。';
+      } else {
+        futureBox.style.display = 'none';
+        futureBox.innerHTML = '';
+      }
+    }
+    if (selY) selY.addEventListener('change', paintYmFuture);
+    if (selM) selM.addEventListener('change', paintYmFuture);
+    paintYmFuture();
+
+    var useCurBtn = body.querySelector('#ym-use-current');
+    if (useCurBtn) useCurBtn.addEventListener('click', function () {
+      if (selY) selY.value = String(curY);
+      if (selM) selM.value = monthList[curM - 1];
+      paintYmFuture();
+    });
+    var missingRow = body.querySelector('#ym-missing-row');
+    if (missingRow && ymState === 'missing') missingRow.style.display = '';
+    if (ymState === 'invalid') {
+      var invalidNote = document.createElement('div');
+      invalidNote.className = 'ym-future-hint';
+      invalidNote.innerHTML = '<b>年月异常：</b>该记录考试年月为「' + U.esc(String(ymInfo.raw)) +
+        '」，保存时默认保留原值；如需修正，请重新选择年份和月份。';
+      body.insertBefore(invalidNote, body.querySelector('#subj-rows'));
+    }
 
     /* 实时计分提示条：随输入变化显示动态满分 / 及格线 / 得分率，并提示选科超 3 门 */
     function readScores() {
@@ -193,6 +301,14 @@
       if (!rec.cls) return fail('班级不能为空！', '[name=cls]');
       if (!rec.exam) return fail('考试名称不能为空！', '[name=exam]');
 
+      /* 考试年月：两个下拉拼 'YYYY-MM'；未选 → fail；脏值编辑未改下拉 → 原样保留 */
+      if (keepRawExamYm && selY && String(selY.value) === RAW_KEEP) {
+        rec.examYm = existing.examYm;
+      } else {
+        rec.examYm = Score.makeExamYm(get('examYear'), get('examMonth'));
+        if (rec.examYm === undefined) return fail('请选择考试年份和月份！', '[name=examYear]');
+      }
+
       var ok = true;
       var clamped = [];                        // 保存前截断的记录：只提示一次，不入库
 
@@ -251,23 +367,60 @@
       }
       if (existing) rec.id = existing.id;
 
-      var res = Score.upsert(rec);
-      /* 兜底：即便上面的表单校验被绕过（如二次封装调用），Store 也会再截一遍；
-         这里把兜底命中项一并告知用户，避免「填 110 存成 100」被当成 bug。 */
-      if (res.clamped && res.clamped.length) {
-        res.clamped.forEach(function (name) {
-          var cap2 = Score.fullOf(S.indexOf(name));
-          var line = name + '最高 ' + cap2 + ' 分，已按 ' + cap2 + ' 计';
-          if (clamped.indexOf(line) < 0) clamped.push(line);
-        });
-      }
-      if (clamped.length) Toast(clamped.join('；'), 'warn', 5200);
+      /* 真正落库（Score.upsert 内部触发 Store.save）—— 覆盖确认前绝不调用 */
+      function persistRec() {
+        var res = Score.upsert(rec);
+        /* 兜底：即便上面的表单校验被绕过（如二次封装调用），Store 也会再截一遍；
+           这里把兜底命中项一并告知用户，避免「填 110 存成 100」被当成 bug。 */
+        if (res.clamped && res.clamped.length) {
+          res.clamped.forEach(function (name) {
+            var cap2 = Score.fullOf(S.indexOf(name));
+            var line = name + '最高 ' + cap2 + ' 分，已按 ' + cap2 + ' 计';
+            if (clamped.indexOf(line) < 0) clamped.push(line);
+          });
+        }
+        if (clamped.length) Toast(clamped.join('；'), 'warn', 5200);
 
-      Toast(res.mode === 'update'
-        ? '已更新 ' + rec.name + ' 在「' + rec.exam + '」的成绩记录'
-        : '录入成功！' + rec.name + ' 「' + rec.exam + '」总分 ' + Score.total(rec) + ' 分，已自动写入总表',
-        res.mode === 'update' ? 'warn' : 'ok');
-      App.render();
+        Toast(res.mode === 'update'
+          ? '已更新 ' + rec.name + ' 在「' + rec.exam + '」的成绩记录'
+          : '录入成功！' + rec.name + ' 「' + rec.exam + '」总分 ' + Score.total(rec) + ' 分，已自动写入总表',
+          res.mode === 'update' ? 'warn' : 'ok');
+        App.render();
+      }
+
+      /* 同键命中且考试年月不同 → 覆盖确认；「返回修改」不产生任何 Store.save() 写入 */
+      function findOverwriteHit() {
+        var rows = allRecords();
+        for (var hi = 0; hi < rows.length; hi++) {
+          var rr = rows[hi];
+          if (existing && (rr === existing || (rec.id && rr.id === rec.id))) continue;  // 编辑态排除自身
+          if (rr.name === rec.name && rr.school === rec.school &&
+              rr.cls === rec.cls && rr.exam === rec.exam) return rr;
+        }
+        return null;
+      }
+      function closeEntryMask() {
+        if (mask && mask.remove) mask.remove();
+      }
+
+      var hit = findOverwriteHit();
+      if (hit && String(hit.examYm) !== String(rec.examYm)) {
+        var msg = '已有同名考试记录（考试年月 ' + U.esc(Score.examYmLabel(hit)) + '），' +
+          '继续保存将覆盖该记录，其成绩、排名与考试年月都会被本次录入替换' +
+          '（本次考试年月 ' + U.esc(Score.examYmLabel(rec)) + '）。<br>' +
+          '确认无误请「覆盖并保存」，需要改动请「返回修改」。';
+        var el = document.createElement('div');
+        el.innerHTML = '<div style="font-size:13.5px;line-height:1.8">' + msg + '</div>';
+        /* Modal.open 原生支持 okText / cancelText，文案由组件渲染，不依赖内部 DOM 选择器 */
+        App.Modal.open({
+          title: '覆盖确认', body: el,
+          okText: '覆盖并保存', cancelText: '返回修改',
+          onOk: function () { closeEntryMask(); persistRec(); }
+        });
+        return false;                       // 录入窗保持打开；返回修改 = 取消，不写库
+      }
+
+      persistRec();
       return true;
     }
 
@@ -287,14 +440,23 @@
         var keep = {
           school: body.querySelector('[name=school]').value,
           cls: body.querySelector('[name=cls]').value,
-          exam: body.querySelector('[name=exam]').value
+          exam: body.querySelector('[name=exam]').value,
+          examYear: body.querySelector('[name=examYear]').value,
+          examMonth: body.querySelector('[name=examMonth]').value
         };
         if (!submit()) return;
+        /* 只清姓名 / 分数 / 排名 / 总分排名；学校、班级、考试名称与考试年月保留 */
+        body.querySelector('[name=school]').value = keep.school;
+        body.querySelector('[name=cls]').value = keep.cls;
+        body.querySelector('[name=exam]').value = keep.exam;
+        body.querySelector('[name=examYear]').value = keep.examYear;
+        body.querySelector('[name=examMonth]').value = keep.examMonth;
         body.querySelector('[name=name]').value = '';
         body.querySelector('[name=totalRank]').value = '';
         body.querySelectorAll('[data-s]').forEach(function (i) { i.value = ''; });
         body.querySelectorAll('[data-r]').forEach(function (i) { i.value = ''; });
         body.querySelector('#form-err').innerHTML = '';
+        paintYmFuture();
         liveTotal();
         body.querySelector('[name=name]').focus();
       });
@@ -316,15 +478,16 @@
     h += '<div class="card"><h3>快捷录入<span class="h-note">与原 Excel「快捷录入成绩」按钮一致</span></h3>' +
       '<button class="primary btn-lg" id="open-form" style="width:100%;padding:14px">打开成绩录入窗体</button>' +
       '<div class="muted" style="margin-top:10px">支持<b>连续录入</b>：提交后自动保留学校/班级/考试名称，' +
-      '只需换姓名即可录下一位同学。</div></div>';
+      '考试年月也会保留，只需换姓名即可录下一位同学。</div></div>';
     h += '<div class="card"><h3>使用说明</h3><ol class="muted" style="font-size:12.5px;line-height:1.9;padding-left:18px">' +
       '<li>在窗体中输入姓名、学校、班级、考试名称及各科成绩和排名</li>' +
       '<li>选科由成绩自动识别：语数英必考，选考科目有分即计入，超过 3 门取最高 3 门</li>' +
       '<li>满分与及格线随选科门数动态变化（满配 6 科 750 分 / 及格 450 分）</li>' +
-      '<li>姓名、学校、班级、考试名称为必填项</li>' +
+      '<li>姓名、学校、班级、考试名称为必填项，考试年份与月份也需选择（默认当前年月）</li>' +
       '<li>没有成绩的科目留空或填 0，未填科目不计入分母，不会拉低得分率</li>' +
-      '<li>录入后自动写入成绩总表并按「学校 → 班级 → 考试先后 → 得分率」排序</li>' +
-      '<li>同一名学生在同一考试重复录入将<b>自动覆盖更新</b>（保留原始录入时间）</li>' +
+      '<li>录入后自动写入成绩总表并按「学校 → 班级 → 考试年月 → 得分率」排序</li>' +
+      '<li>同一名学生在同一考试重复录入将<b>自动覆盖更新</b>（保留原始录入时间）；' +
+      '若两条记录考试年月不同，会先弹窗确认再覆盖</li>' +
       '</ol></div></div>';
 
     h += '<div class="card"><h3>最近录入<span class="h-note">最近 8 条</span></h3>';
@@ -394,14 +557,21 @@
       return h;
     }
 
-    h += '<div class="tbl-wrap"><table><thead><tr><th class="c">序号</th><th>姓名</th><th>学校</th><th>班级</th><th>考试</th>';
+    h += '<div class="tbl-wrap"><table><thead><tr><th class="c">序号</th><th>姓名</th><th>学校</th><th>班级</th><th>考试</th><th class="ym-col">考试年月</th>';
     S.forEach(function (s) { h += '<th class="num">' + s + '</th>'; });
     if (f.showRank) S.forEach(function (s) { h += '<th class="num">' + s + '<br>排名</th>'; });
     h += '<th class="num">总分</th><th class="num">总排名</th><th>录入时间</th><th class="c">操作</th></tr></thead><tbody>';
 
     rows.forEach(function (r, i) {
+      var ymTxt = Score.examYmLabel(r);
+      var ymHtml = ymTxt === '未标注年月'
+        ? '<span class="chip ch-ym-missing">未标注年月</span>'
+        : (ymTxt === '年月异常'
+          ? '<span class="chip ch-ym-invalid">年月异常</span>'
+          : '<span class="ym-ok">' + U.esc(ymTxt) + '</span>');
       h += '<tr><td class="c muted">' + (i + 1) + '</td><td><b>' + U.esc(r.name) + '</b></td>' +
-        '<td>' + U.esc(r.school) + '</td><td>' + U.esc(r.cls) + '</td><td>' + U.esc(r.exam) + '</td>';
+        '<td>' + U.esc(r.school) + '</td><td>' + U.esc(r.cls) + '</td><td>' + U.esc(r.exam) + '</td>' +
+        '<td class="ym-col">' + ymHtml + '</td>';
       S.forEach(function (s, j) {
         var v = Number(r.scores[j]) || 0;
         var cap = Score.fullOf(j);
@@ -517,7 +687,13 @@
       return (!q.school || r.school === q.school) && (!q.cls || r.cls === q.cls);
     });
     var nameList = Object.keys(pool.reduce(function (a, r) { a[r.name] = 1; return a; }, {})).sort(U.zh);
-    var examList = Object.keys(pool.reduce(function (a, r) { a[r.exam] = 1; return a; }, {})).sort(U.zh);
+    /* 下拉级统一真源：每个考试按最小有效年月升序；选项文案仍是 exam 原文 */
+    var examList = Score.options(pool).exams;
+    var examYmHint = '—';
+    if (q.exam) {
+      var exRows = Score.sortByExam(pool.filter(function (r) { return r.exam === q.exam; }));
+      examYmHint = exRows.length ? Score.examYmLabel(exRows[0]) : '—';
+    }
 
     var h = '<div class="card"><h3>查询条件<span class="h-note">四级联动，对应原「刷新选项」按钮（本版本自动实时刷新）</span></h3>' +
       '<div class="toolbar">' +
@@ -526,7 +702,9 @@
       '<label class="f">姓名<select id="q-name">' + opts(nameList, q.name, '请选择') + '</select></label>' +
       '<label class="f">考试<select id="q-exam">' + opts(examList, q.exam, '请选择') + '</select></label>' +
       '<button id="q-run" class="primary">生成成绩分析报告</button>' +
-      '</div></div>';
+      '</div>' +
+      '<div class="muted ym-filter-hint">考试年月：' + U.esc(examYmHint) + '</div>' +
+      '</div>';
 
     if (!q.school || !q.cls || !q.name || !q.exam) {
       return h + '<div class="card"><div class="empty">请选择学校、班级、姓名和考试名称。</div></div>';
@@ -537,8 +715,8 @@
       return h + '<div class="card"><div class="empty">未找到 ' + U.esc(q.name) + ' 在「' + U.esc(q.exam) + '」中的成绩记录。</div></div>';
     }
     var classRows = byCond(all, { school: q.school, cls: q.cls, exam: q.exam });
-    // 历史记录：按总表规范顺序（考试先后）
-    var studentRows = Score.sort(byCond(all, { school: q.school, cls: q.cls, name: q.name }));
+    // 历史记录：记录级按考试年月升序（Score.sortByExam）；Score.sort 是分组级，不能当学生序列用
+    var studentRows = Score.sortByExam(byCond(all, { school: q.school, cls: q.cls, name: q.name }));
 
     /* 对比表 */
     h += '<div class="card"><h3>① 成绩对比班级均分<span class="h-note">' + classRows.length + ' 名同学参与本次统计</span></h3>';
@@ -621,7 +799,7 @@
     var target = byCond(all, { school: q.school, cls: q.cls, name: q.name, exam: q.exam })[0];
     if (!target) return;
     var classRows = byCond(all, { school: q.school, cls: q.cls, exam: q.exam });
-    var studentRows = Score.sort(byCond(all, { school: q.school, cls: q.cls, name: q.name }));
+    var studentRows = Score.sortByExam(byCond(all, { school: q.school, cls: q.cls, name: q.name }));
 
     var cb = host.querySelector('#chart-bar');
     if (cb) {
@@ -647,18 +825,25 @@
       } else {
         var idx = state.trend, isTotal = idx === 'total';
         var label = isTotal ? '总分得分率' : S[Number(idx)];
-        var labels = [], sc = [], rk = [];
+        var sc = [], rk = [];
         studentRows.forEach(function (r) {
-          labels.push(r.exam);
           /* 总分口径用得分率（不同考试选科门数可能不同，绝对分不可直接比） */
           sc.push(isTotal
             ? Math.round(Score.totalRate(r) * 1000) / 10
             : (Number(r.scores[Number(idx)]) || 0));
           rk.push(isTotal ? (r.totalRank || 0) : (Number(r.ranks[Number(idx)]) || 0));
         });
+        /* x 轴统一由 Score.examAxisLabels 产出：8 字上限短标签 + 完整 title，labels 仍是字符串数组 */
+        var ax = Score.examAxisLabels(studentRows);
+        var axisLabels = ax.map(function (a) { return a.label; });
+        var axisTitles = ax.map(function (a) { return a.title; });
+        if (axisLabels.length !== sc.length) {
+          axisLabels = studentRows.map(function (r) { return r.exam; });
+          axisTitles = axisLabels.slice();
+        }
         ct.appendChild(App.Chart.dualLine({
           title: target.name + ' — ' + label + '历史趋势',
-          labels: labels, score: sc, rank: rk,
+          labels: axisLabels, labelTitles: axisTitles, score: sc, rank: rk,
           scoreLabel: isTotal ? '得分率(%)' : label + '成绩', rankLabel: label + '排名'
         }));
       }
@@ -712,9 +897,17 @@
         if (exs.length < 2) {
           trendBox.innerHTML = '<div class="empty">只有一次考试记录，暂不生成趋势图。</div>';
         } else {
+          /* 报告「四、趋势」与历史趋势图共用同一把年月序键 */
+          var ax2 = Score.examAxisLabels(studentRows);
+          var axisLabels2 = ax2.map(function (a) { return a.label; });
+          var axisTitles2 = ax2.map(function (a) { return a.title; });
+          if (axisLabels2.length !== exs.length) {
+            axisLabels2 = exs.map(function (e) { return e.exam; });
+            axisTitles2 = axisLabels2.slice();
+          }
           trendBox.appendChild(App.Chart.dualLine({
             title: target.name + ' — 总分得分率趋势',
-            labels: exs.map(function (e) { return e.exam; }),
+            labels: axisLabels2, labelTitles: axisTitles2,
             score: exs.map(function (e) { return Math.round((e.rate || 0) * 1000) / 10; }),
             rank: exs.map(function () { return 0; }),
             scoreLabel: '得分率(%)', rankLabel: '总分排名'
@@ -1254,13 +1447,26 @@
     var oAll = Score.options(all);
 
     // 组合：「学校 | 班级 | 考试」（比原版更严谨，避免同名班级跨校合并）
+    // 组代表年月 = 组内最小有效 examOrderKey(r).num；缺年月组排末尾（V3-3）
     var groups = {}, order = [];
     all.forEach(function (r) {
       var k = r.school + '\u0001' + r.cls + '\u0001' + r.exam;
-      if (!groups[k]) { groups[k] = { exam: r.exam, cls: r.cls, school: r.school }; order.push(k); }
+      if (!groups[k]) {
+        groups[k] = { exam: r.exam, cls: r.cls, school: r.school, minNum: Infinity, ym: '' };
+        order.push(k);
+      }
+      var ymKey = Score.examOrderKey(r);
+      if (ymKey.has && ymKey.num < groups[k].minNum) {
+        groups[k].minNum = ymKey.num;
+        groups[k].ym = Score.examYmOf(r).ym || '';
+      }
     });
     order.sort(function (a, b) {
-      return U.zh(groups[a].exam, groups[b].exam) || U.zh(groups[a].cls, groups[b].cls);
+      var ga = groups[a], gb = groups[b];
+      var ha = ga.minNum !== Infinity, hb = gb.minNum !== Infinity;
+      if (ha !== hb) return ha ? -1 : 1;                 // 缺年月组排末尾
+      if (ha && ga.minNum !== gb.minNum) return ga.minNum - gb.minNum;
+      return U.zh(ga.exam, gb.exam) || U.zh(ga.cls, gb.cls);
     });
 
     var sel = state.statExam;
@@ -1277,6 +1483,7 @@
       var g = groups[k];
       var prows = byCond(all, { school: g.school, cls: g.cls, exam: g.exam });
       h += '<div style="margin:14px 0 6px;font-size:13px"><b>' + U.esc(g.exam) + '</b>' +
+        ' <span class="muted">（' + U.esc(g.ym || '未标注年月') + '）</span>' +
         ' <span class="chip ch-blue">' + U.esc(g.school) + ' ' + U.esc(g.cls) + '</span>' +
         ' <span class="muted">' + prows.length + ' 人</span></div>';
       h += '<div class="tbl-wrap" style="max-height:none"><table><thead><tr><th>科目</th>' +

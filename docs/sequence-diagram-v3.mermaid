@@ -1,0 +1,29 @@
+sequenceDiagram
+  autonumber
+  participant U as 教师
+  participant F as module-score openForm
+  participant S as Score.upsert / Store
+  participant SY as sync.js (fp/toRow)
+  participant C as 云端 score_records
+  participant P as pull / snapshot()
+  participant Q as Score.sortByExam
+  participant V as 趋势图 / 分析报告 / 班级分析
+
+  U->>F: 补录 10月段考（81%），选 2026 / 10月
+  F->>F: 默认本地年月 → 可改；同键命中且年月不同 → 覆盖确认
+  F->>S: rec.examYm='2026-10'; Score.upsert(rec)
+  S->>S: 保留 ts、_cid；Score.key 仍 4 字段
+  S->>SY: Store.save() → afterSave → pushRows()
+  SY->>SY: fp(r) 含 examYm → 与 snap 不同 → 判定有改动
+  SY->>C: toRow 条件带上 exam_ym → update by _cid
+  C-->>SY: ok → snap[k]=fp(r), synced[k]=snapState(r)
+  Note over SY,C: 用户主动编辑更新 updated_at/last_editor 属正常，不违反 V-H2
+  U->>P: 刷新 / 45s 定时拉取
+  P->>C: select *（含 exam_ym）
+  C-->>P: 42 行（11月先录、10月后补）
+  P->>P: fromRow 映射 examYm；snap=snapshot()
+  P->>Q: studentRows（2 条）
+  Q->>Q: examOrderKey: 2026-10=24322 < 2026-11=24323
+  Q-->>V: [10月段考(81%), 11月段考(40.96%)]
+  V->>V: Score.history 相邻比较 → 结论「明显下滑」
+  V-->>U: x 轴 10月段考 → 11月段考；截图数值倒置问题修复

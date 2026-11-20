@@ -238,6 +238,8 @@
       school: String(r.school || ''),
       cls: String(r.cls || ''),
       exam: String(r.exam || ''),
+      /* V3-2：备份恢复白名单带上年月；缺字段时保持 undefined，不写 ''（会清空云端） */
+      examYm: (r.examYm == null) ? undefined : String(r.examYm),
       scores: s, ranks: rk,
       totalRank: Number(r.totalRank) || 0,
       ts: r.ts || new Date().toISOString(),

@@ -1,0 +1,100 @@
+classDiagram
+  class ScoreRecord {
+    +id string
+    +name string
+    +school string
+    +cls string
+    +exam string
+    +examYm String_or_undefined
+    +scores number[]
+    +ranks number[]
+    +totalRank number
+    +ts string
+    +mod string
+    +_cid uuid
+    +_by string
+  }
+  class CloudRow {
+    +id uuid
+    +rec_id string
+    +stu_name string
+    +school string
+    +class_name string
+    +exam string
+    +exam_ym text_NEW
+    +scores jsonb
+    +ranks jsonb
+    +total numeric
+    +total_rank int
+    +entered_at text
+    +created_at timestamp
+    +updated_at timestamp
+    +last_editor text
+    +owner_id uuid
+    +owner_name text
+  }
+  CloudRow : existing 16 columns unchanged
+  CloudRow : unique(stu_name,school,class_name,exam) unchanged
+
+  class SyncLayer {
+    +toRow(r) row
+    +fromRow(row) record
+    +fp(r) string
+    +snapState(r) object
+    +restoreState(r,s)
+    +pushRows()
+    +pullRows()
+    +adoptByKey(r,row)
+    +pushDeletes()
+  }
+  class ScoreSort {
+    +defaultExamYm() string
+    +makeExamYm(y,m) string
+    +examYmOf(r) YmInfo
+    +examOrderKey(r) OrderKey
+    +sortByExam(rows) Array
+    +examCmp(a,b) number
+    +sort(list) Array
+    +options(list) object
+    +history(rows,idx,cur) object
+    +examYmLabel(r) string
+    +examAxisLabels(rows) Array
+  }
+  class ExportLayer {
+    +backupJSON() object
+    +normalizeRecord(r) record
+    +restoreJSON(text) number
+    +masterExportRows() UNCHANGED
+  }
+  class ScoreForm {
+    +openForm(existing,onDone)
+    +submit() bool
+    +keep object
+  }
+  class Chart {
+    +dualLine(opt)
+    +opt.labels string[]
+    +opt.labelTitles string[]_NEW
+  }
+  class Analysis {
+    +trend.exams Array
+    +bySubject Array
+  }
+  class ClassesCore {
+    +classScoreAnalysis(classId,deps)
+    +timeOf(r) number
+  }
+  class AppDB {
+    +FORBIDDEN
+    +define(name,opts)
+  }
+
+  SyncLayer ..> ScoreRecord : fromRow / toRow 映射 exam_ym ↔ examYm
+  SyncLayer ..> CloudRow : 仅 score_records（独占）
+  ExportLayer ..> ScoreRecord : 备份/恢复白名单 examYm
+  ScoreForm ..> ScoreRecord : 写入 examYm
+  ScoreForm ..> ScoreSort : makeExamYm / examYmOf
+  ScoreSort ..> Analysis : 有序 studentRows
+  ScoreSort ..> Chart : examAxisLabels
+  ScoreSort ..> ClassesCore : sortByExam 供 perStudent
+  AppDB ..> CloudRow : FORBIDDEN 禁止访问 score_records

@@ -115,11 +115,66 @@
       });
       var mine = students.filter(function (s) { return inClass[String(s.id)]; });
 
-      /** 成绩记录的「录入时间」：从云端下发时 entered_at 映射为 ts */
+      /**
+       * 成绩记录的「录入时间」：从云端下发时 entered_at 映射为 ts。
+       *
+       * V3-4（timeOf 三用途分离，ARCH #24 / V-G3）：本函数**只**再用于两处 ——
+       *   ① 同考试去重取较新一行（身份判定不受年月改造影响，该场考试不能被拆成两次）；
+       *   ③ 全序列缺年月时逐字回退的旧录入时间升序（D5 / V-D1）。
+       * 考试的先后次序改由 Score.examOrderKey 的年月数值决定（分组级 ② / 记录级 ③），
+       * 本函数不再承担「决定谁先谁后」的职责，函数本体保持不变。
+       */
       function timeOf(r) {
         var raw = r && (r.entered_at || r.mod || r.ts);
         var t = Date.parse(raw || '');
         return isNaN(t) ? 0 : t;
+      }
+
+      /**
+       * 分组级排序键：一组考试记录的「代表年月」（ARCH §2.2 分组级口径）。
+       * · 代表年月 = 组内最小有效 Score.examOrderKey(r).num（year*12+month 数值，跨年正确，V-B1/B2）；
+       * · 整组无有效年月 → has=false，并用组内最小录入时间兜底，使「全序列缺年月」时
+       *   与改造前的 timeOf 升序逐字一致（D5 / V-D1，smoke-v2-students-classes.js 夹具不改仍全绿）；
+       * · 混合序列时 has=false 的组排末尾（V-D2）。
+       * @param {Array} rows 该考试名下的成绩记录
+       * @param {string} examName 考试名（代表年月同值时用 U.zh 兜底）
+       * @returns {{has:boolean, num:number, ts:number, exam:string, ym:(string|null)}}
+       */
+      function examGroupKey(rows, examName) {
+        var minNum = Number.POSITIVE_INFINITY;
+        var minTs = Number.POSITIVE_INFINITY;
+        var has = false;
+        var bestYm = null;
+        for (var i = 0; i < rows.length; i++) {
+          var k = Score.examOrderKey(rows[i]);
+          if (k.has && k.num < minNum) {
+            minNum = k.num;
+            has = true;
+            bestYm = Score.examYmOf(rows[i]).ym;
+          }
+          var t = timeOf(rows[i]);
+          if (t < minTs) minTs = t;
+        }
+        return {
+          has: has,
+          num: has ? minNum : Number.POSITIVE_INFINITY,
+          ts: isFinite(minTs) ? minTs : 0,
+          exam: examName,
+          ym: bestYm
+        };
+      }
+
+      /**
+       * 分组级比较（②）：has 优先（缺年月的组排末尾）→ 代表年月数值升序 → U.zh(exam)；
+       * 两边都无有效年月时逐字沿用旧的「组内最小录入时间升序 → U.zh(exam)」回退。
+       */
+      function examGroupCmp(a, b) {
+        if (a.has !== b.has) return a.has ? -1 : 1;
+        if (a.has) {
+          if (a.num !== b.num) return a.num < b.num ? -1 : 1;
+          return U.zh(a.exam, b.exam);
+        }
+        return (a.ts - b.ts) || U.zh(a.exam, b.exam);
       }
 
       var matched = [], unmatched = [], matchedRecs = [], seenRecs = [];
@@ -146,16 +201,20 @@
         });
       });
 
-      /* 按考试分组（考试顺序 = 该考试最早录入时间升序） */
+      /* 按考试分组（② 分组位置改按年月序：组内最小有效 examOrderKey.num 升序，
+         同值 U.zh(exam) 兜底、缺年月的组排末尾；全序列缺年月时由 examGroupCmp
+         逐字回退旧的「最早录入时间升序」，D5 / V-D1） */
       var examMap = {};
       matchedRecs.forEach(function (r) {
         var ex = String(r.exam || '');
         (examMap[ex] = examMap[ex] || []).push(r);
       });
+      var groupKeys = {};
+      Object.keys(examMap).forEach(function (ex) {
+        groupKeys[ex] = examGroupKey(examMap[ex], ex);
+      });
       var examNames = Object.keys(examMap).sort(function (a, b) {
-        var ta = Math.min.apply(null, examMap[a].map(timeOf));
-        var tb = Math.min.apply(null, examMap[b].map(timeOf));
-        return (ta - tb) || U.zh(a, b);
+        return examGroupCmp(groupKeys[a], groupKeys[b]);
       });
 
       var perExam = examNames.map(function (ex) {
@@ -163,6 +222,8 @@
         var st = Score.stat(rows, 'total');
         return {
           exam: ex,
+          /* 该组最小有效年月，供分组标题显示「（YYYY-MM）」；整组取不到时为 null（不加括号） */
+          examYm: groupKeys[ex].ym,
           count: st.count,
           avg: r1(st.avg),
           max: st.max,
@@ -197,7 +258,16 @@
 
       var perStudent = matched.map(function (m) {
         var list = Object.keys(m.byExam).map(function (ex) { return m.byExam[ex]; });
-        list.sort(function (a, b) { return timeOf(a) - timeOf(b); });
+        /* ③ last / prev 的序列来源改按年月序（V-G2）：
+           · 有年月 → Score.sortByExam（跨年数值序、混合序列无年月排末尾，V-A1 / V-B1 / V-B2）；
+           · 全序列缺年月 → 逐字沿用旧的 timeOf 升序（D5 / V-D1）。
+           说明：Score.sortByExam 自身的全缺回退是分组级 legacySortByTs（按 学校|班级|考试 编序号），
+           对「同一学生历次考试」这种记录级序列并不等价于旧的纯录入时间序（弱关联下 cls 可能不同），
+           故此处显式分流，保证 smoke-v2-students-classes.js 的「最近一次 = 期末考试」断言不受影响。
+           last / prev 取法与 delta 符号语义不变，只是序列来源变了。 */
+        var hasAnyYm = list.some(function (r) { return Score.examOrderKey(r).has; });
+        if (hasAnyYm) list = Score.sortByExam(list);
+        else list.sort(function (a, b) { return timeOf(a) - timeOf(b); });
         var last = list.length ? list[list.length - 1] : null;
         var prev = list.length > 1 ? list[list.length - 2] : null;
         var exam = last ? String(last.exam || '') : '';
@@ -580,7 +650,9 @@
       '<th class="num">最低</th><th class="num">及格率</th><th class="num">平均得分率</th>' +
       '</tr></thead><tbody>';
     an.perExam.forEach(function (e) {
-      h += '<tr><td><b>' + esc(e.exam) + '</b></td>' +
+      /* 分组标题带该组最小有效年月（YYYY-MM）；取不到年月时回退为只显示考试名，逐字不变 */
+      h += '<tr><td><b>' + esc(e.exam) + '</b>' +
+        (e.examYm ? '<span class="muted">（' + esc(e.examYm) + '）</span>' : '') + '</td>' +
         '<td class="num">' + e.count + '</td>' +
         '<td class="num"><b>' + U.f1(e.avg) + '</b></td>' +
         '<td class="num">' + (e.max === null ? '—' : U.f1(e.max)) + '</td>' +

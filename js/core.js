@@ -250,6 +250,42 @@
   /* =========================================================
    * 成绩算法（完全复刻原 VBA 的业务口径）
    * ========================================================= */
+  /* ------------------------------------------------------------------
+   * V3-2：全序列缺年月时的逐字回退实现（原 Score.sort 的 27 行，原文抽出）。
+   *
+   * 这段逻辑是 D5「全缺年月逐字回退」的唯一真源：新 Score.sort 与
+   * Score.sortByExam 在没有任何有效年月时都直接调用它，保证旧夹具
+   * （smoke-v2-students-classes.js 的「perExam 最早录入升序 / 最近一次期末考试」）
+   * 与改造前的总表顺序逐字节一致。私有函数，不挂 Score，不新增 js 文件。
+   * ------------------------------------------------------------------ */
+  function legacySortByTs(list) {
+    var arr = list.slice();
+    var examTs = {}, order = {}, i, k, sc;
+    for (i = 0; i < arr.length; i++) {
+      k = [arr[i].school, arr[i].cls, arr[i].exam].join('|');
+      var t = new Date(arr[i].ts || 0).getTime();
+      if (!(k in examTs) || t < examTs[k]) examTs[k] = t;
+    }
+    var bySc = {};
+    for (k in examTs) {
+      sc = k.split('|').slice(0, 2).join('|');
+      (bySc[sc] = bySc[sc] || []).push(k);
+    }
+    for (sc in bySc) {
+      bySc[sc].sort(function (a, b) { return examTs[a] - examTs[b]; });
+      for (i = 0; i < bySc[sc].length; i++) order[bySc[sc][i]] = i + 1;
+    }
+    arr.sort(function (a, b) {
+      var ka = [a.school, a.cls, a.exam].join('|'), kb = [b.school, b.cls, b.exam].join('|');
+      /* 同一考试内按得分率降序（选科门数不同，绝对分不可直接比较），率相同再比绝对分 */
+      return U.zh(a.school, b.school) || U.zh(a.cls, b.cls) ||
+        (order[ka] - order[kb]) ||
+        (Score.totalRate(b) - Score.totalRate(a)) ||
+        (Score.total(b) - Score.total(a)) || U.zh(a.name, b.name);
+    });
+    return arr;
+  }
+
   var Score = {
     /** 一条空记录 */
     newRecord: function () {
@@ -257,6 +293,8 @@
       for (var i = 0; i < K.NUM_SUBJECTS; i++) { s.push(0); r.push(0); }
       return {
         id: U.uid(), name: '', school: '', cls: '', exam: '',
+        /* V3-2：undefined = 缺年月（禁止用 '' 表示），新记录由窗体赋值 */
+        examYm: undefined,
         scores: s, ranks: r, totalRank: 0, ts: new Date().toISOString()
       };
     },
@@ -514,28 +552,59 @@
     },
 
     /**
-     * 总表排序 —— 对应 SortMasterSheetEx：
-     * 1) 每个「学校|班级|考试」取最早录入时间；
-     * 2) 在「学校|班级」内按该时间先后编出考试序号；
-     * 3) 再按 学校↑ → 班级↑ → 考试序号↑ → 总分↓ → 姓名↑ 排序。
+     * 总表排序（分组级）—— 组代表年月 = 组内最小有效 examOrderKey(r).num。
+     *
+     * · 全序列缺年月 → 直接 return legacySortByTs(list)，与改造前逐字一致（D5 / D8）；
+     * · 有年月 → 同一「学校|班级」内按 组代表年月数值升序，U.zh(exam) → ts → id 兜底；
+     *   缺年月的组排在末尾；组内仍按 得分率↓ → 总分↓ → 姓名↑（现状不变）。
+     *
+     * 注意：本函数是分组排序，不能拿它当「某学生的考试序列」用 —— 记录级请用 sortByExam。
      */
     sort: function (list) {
       var arr = list.slice();
-      var examTs = {}, order = {}, i, k, sc;
+      var i, k, sc, r, ok, t, sid;
+      var hasAny = arr.some(function (x) { return Score.examOrderKey(x).has; });
+      if (!hasAny) return legacySortByTs(arr);
+
+      /* 每个「学校|班级|考试」组的最小有效年月、最早录入时间、最小 id */
+      var meta = {};
       for (i = 0; i < arr.length; i++) {
-        k = [arr[i].school, arr[i].cls, arr[i].exam].join('|');
-        var t = new Date(arr[i].ts || 0).getTime();
-        if (!(k in examTs) || t < examTs[k]) examTs[k] = t;
+        r = arr[i] || {};
+        k = [r.school, r.cls, r.exam].join('|');
+        ok = Score.examOrderKey(r);
+        t = new Date(r.ts || 0).getTime();
+        if (!isFinite(t)) t = 0;
+        sid = String(r.id === null || r.id === undefined ? '' : r.id);
+        if (!meta[k]) meta[k] = { num: ok.num, exam: String(r.exam || ''), ts: t, id: sid };
+        else {
+          if (ok.num < meta[k].num) meta[k].num = ok.num;
+          if (t < meta[k].ts) meta[k].ts = t;
+          if (sid < meta[k].id) meta[k].id = sid;
+        }
       }
+
       var bySc = {};
-      for (k in examTs) {
+      for (k in meta) {
         sc = k.split('|').slice(0, 2).join('|');
         (bySc[sc] = bySc[sc] || []).push(k);
       }
+      var order = {};
       for (sc in bySc) {
-        bySc[sc].sort(function (a, b) { return examTs[a] - examTs[b]; });
+        bySc[sc].sort(function (a, b) {
+          var ma = meta[a], mb = meta[b];
+          if (ma.num !== mb.num) {
+            /* Infinity（整组缺年月）自然排末尾 */
+            if (!isFinite(ma.num) || !isFinite(mb.num)) return isFinite(ma.num) ? -1 : 1;
+            return ma.num < mb.num ? -1 : 1;
+          }
+          var z = U.zh(ma.exam, mb.exam);
+          if (z) return z;
+          if (ma.ts !== mb.ts) return ma.ts < mb.ts ? -1 : 1;
+          return ma.id < mb.id ? -1 : (ma.id > mb.id ? 1 : 0);
+        });
         for (i = 0; i < bySc[sc].length; i++) order[bySc[sc][i]] = i + 1;
       }
+
       arr.sort(function (a, b) {
         var ka = [a.school, a.cls, a.exam].join('|'), kb = [b.school, b.cls, b.exam].join('|');
         /* 同一考试内按得分率降序（选科门数不同，绝对分不可直接比较），率相同再比绝对分 */
@@ -547,14 +616,184 @@
       return arr;
     },
 
-    /** 去重后的学校/班级/姓名/考试列表 */
+    /** 去重后的学校/班级/姓名/考试列表；exams 按该 exam 的最小有效年月数值升序（同值 U.zh） */
     options: function (list) {
       var s = {}, c = {}, n = {}, e = {}, i;
       for (i = 0; i < list.length; i++) {
         s[list[i].school] = 1; c[list[i].cls] = 1; n[list[i].name] = 1; e[list[i].exam] = 1;
       }
       var toArr = function (o) { return Object.keys(o).sort(U.zh); };
-      return { schools: toArr(s), classes: toArr(c), names: toArr(n), exams: toArr(e) };
+
+      /* 每个 exam 在传入集合里的最小有效年月；没有有效年月时按 U.zh 保持原顺序 */
+      var ymNum = {};
+      for (i = 0; i < list.length; i++) {
+        var ok = Score.examOrderKey(list[i]);
+        if (!ok.has) continue;
+        var ex = String(list[i].exam);
+        if (ymNum[ex] === undefined || ok.num < ymNum[ex]) ymNum[ex] = ok.num;
+      }
+      var exams = Object.keys(e).sort(function (a, b) {
+        var na = ymNum[a] === undefined ? Number.POSITIVE_INFINITY : ymNum[a];
+        var nb = ymNum[b] === undefined ? Number.POSITIVE_INFINITY : ymNum[b];
+        /* 两者都是 Infinity 时落到 U.zh，与改造前的 exams 顺序逐字一致 */
+        if (na !== nb) {
+          if (!isFinite(na) || !isFinite(nb)) return isFinite(na) ? -1 : 1;
+          return na < nb ? -1 : 1;
+        }
+        return U.zh(a, b);
+      });
+      return { schools: toArr(s), classes: toArr(c), names: toArr(n), exams: exams };
+    },
+
+    /* ================================================================
+     * V3-2：考试年月纯函数（全站排序与展示的唯一真源，全部无副作用）
+     *   云端 exam_ym ↔ 内存 examYm 的映射只在 sync.js toRow/fromRow；
+     *   undefined = 缺年月，非法值原样保留，绝不补零或纠偏。
+     * ================================================================ */
+
+    /** 默认年月：本地时区，禁止用 toISOString().slice(0,7) 取 UTC */
+    defaultExamYm: function () {
+      var d = new Date();
+      var m = d.getMonth() + 1;
+      return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m;
+    },
+
+    /** 两个下拉值 → 'YYYY-MM'；年份按 D1 严格 4 位、月份 1–12，均须整数 */
+    makeExamYm: function (year, month) {
+      var y = Number(year), m = Number(month);
+      if (!isFinite(y) || !isFinite(m)) return undefined;
+      if (Math.floor(y) !== y || Math.floor(m) !== m) return undefined;
+      if (!(y >= 1000 && y <= 9999) || !(m >= 1 && m <= 12)) return undefined;
+      return y + '-' + (m < 10 ? '0' : '') + m;
+    },
+
+    /**
+     * 解析考试年月。容忍三种输入：内存记录 r.examYm、云端风格 r.exam_ym、裸 'YYYY-MM' 字符串。
+     * @returns {{raw:string, ym:(string|null), y:number, m:number, valid:boolean,
+     *            state:('ok'|'missing'|'invalid')}}
+     */
+    examYmOf: function (r) {
+      var raw;
+      if (r === null || r === undefined) raw = '';
+      else if (typeof r === 'string' || typeof r === 'number' || typeof r === 'boolean') raw = r;
+      else if (Object.prototype.hasOwnProperty.call(r, 'examYm')) raw = r.examYm;
+      else if (Object.prototype.hasOwnProperty.call(r, 'exam_ym')) raw = r.exam_ym;
+      else raw = undefined;
+      var s = (raw === null || raw === undefined) ? '' : String(raw);
+      var hit = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(s);
+      if (hit) {
+        return { raw: s, ym: s, y: Number(hit[1]), m: Number(hit[2]), valid: true, state: 'ok' };
+      }
+      return {
+        raw: s, ym: null, y: 0, m: 0, valid: false,
+        state: s === '' ? 'missing' : 'invalid'
+      };
+    },
+
+    /**
+     * 排序主键：num = year*12+month；缺年月 / 年月异常 → has=false、num=+Infinity。
+     * @returns {{has:boolean, num:number, exam:string, ts:number, id:string}}
+     */
+    examOrderKey: function (r) {
+      var info = Score.examYmOf(r);
+      var rec = (r && typeof r === 'object') ? r : {};
+      var t = new Date(rec.ts || 0).getTime();
+      if (!isFinite(t)) t = 0;
+      return {
+        has: info.valid,
+        num: info.valid ? info.y * 12 + info.m : Number.POSITIVE_INFINITY,
+        exam: String(rec.exam === null || rec.exam === undefined ? '' : rec.exam),
+        ts: t,
+        id: String(rec.id === null || rec.id === undefined ? '' : rec.id)
+      };
+    },
+
+    /** 全序比较链：has → num → U.zh(exam) → ts → String(id) */
+    examCmp: function (a, b) {
+      var ka = Score.examOrderKey(a), kb = Score.examOrderKey(b);
+      if (ka.has !== kb.has) return ka.has ? -1 : 1;
+      if (ka.num !== kb.num) {
+        if (!isFinite(ka.num) || !isFinite(kb.num)) return isFinite(ka.num) ? -1 : 1;
+        return ka.num < kb.num ? -1 : 1;
+      }
+      var z = U.zh(ka.exam, kb.exam);
+      if (z) return z;
+      if (ka.ts !== kb.ts) return ka.ts < kb.ts ? -1 : 1;
+      return ka.id < kb.id ? -1 : (ka.id > kb.id ? 1 : 0);
+    },
+
+    /**
+     * 记录级稳定排序：返回新数组、不改动入参；全序列缺年月时逐字回退旧实现。
+     * first=arr[0]、last=arr[n-1]、prev=arr[n-2]（调用方按有序序列消费）。
+     */
+    sortByExam: function (rows) {
+      var arr = (rows || []).slice();
+      var hasAny = arr.some(function (r) { return Score.examOrderKey(r).has; });
+      if (!hasAny) return legacySortByTs(arr);
+      return arr.sort(Score.examCmp);
+    },
+
+    /** 表格 chip：合法 'YYYY-MM' / 缺 '未标注年月' / 非法 '年月异常' */
+    examYmLabel: function (r) {
+      var info = Score.examYmOf(r);
+      if (info.state === 'ok') return info.ym;
+      if (info.state === 'invalid') return '年月异常';
+      return '未标注年月';
+    },
+
+    /**
+     * 趋势图 x 轴标签：同年且无同年月多场保持 exam 原文；跨年加 YY年·；
+     * 同年月多场加 M月·；缺年月加 未标注·、年月异常加 异常·。
+     *
+     * D5 逐字回退：全序列都「缺年月」（没有任何合法或非法年月值）时，直接返回
+     * `{label: exam 原文, title: exam 原文}` —— 不加前缀、不做 8 字截断，与改造前
+     * `labels.push(r.exam)` 的 x 轴文案逐字一致。只要有一条带了年月值（合法或非法）
+     * 就走新分支，label 上限 8 个全角字符 + 省略号，
+     * title = 'YYYY-MM / 年月异常 / 未标注年月 · exam 原文'。
+     *
+     * @returns {Array<{label:string, title:string}>} 与入参等长、同序
+     */
+    examAxisLabels: function (rows) {
+      var list = rows || [];
+      var examTextOf = function (r) {
+        var rec = (r && typeof r === 'object') ? r : {};
+        return String(rec.exam == null ? '' : rec.exam);
+      };
+      /* D5：全序列缺年月 → 旧版 x 轴逐字回退（exam 原文，无前缀、无截断） */
+      var hasAnyYm = list.some(function (r) {
+        return Score.examYmOf(r).state !== 'missing';
+      });
+      if (!hasAnyYm) {
+        return list.map(function (r) {
+          var examText = examTextOf(r);
+          return { label: examText, title: examText };
+        });
+      }
+
+      var years = {}, byYm = {}, i, info;
+      for (i = 0; i < list.length; i++) {
+        info = Score.examYmOf(list[i]);
+        if (!info.valid) continue;
+        years[String(info.y)] = 1;
+        byYm[info.ym] = (byYm[info.ym] || 0) + 1;
+      }
+      var crossYear = Object.keys(years).length > 1;
+      return list.map(function (r) {
+        info = Score.examYmOf(r);
+        var examText = examTextOf(r);
+        var ymText = info.state === 'ok' ? info.ym
+          : (info.state === 'invalid' ? '年月异常' : '未标注年月');
+        var prefix = '';
+        if (info.state === 'invalid') prefix = '异常·';
+        else if (info.state === 'missing') prefix = '未标注·';
+        else if (crossYear) prefix = String(info.y).slice(-2) + '年·';
+        else if (byYm[info.ym] > 1) prefix = info.m + '月·';
+
+        var label = prefix + examText;
+        var chars = Array.from ? Array.from(label) : label.split('');
+        if (chars.length > 8) label = chars.slice(0, 7).join('') + '…';
+        return { label: label, title: ymText + ' · ' + examText };
+      });
     },
 
     /** 按条件取子集 */
@@ -715,6 +954,12 @@
         record.ts = list[idx].ts;                 // 保留原始录入时间，避免打乱考试顺序
         if (list[idx]._cid) record._cid = list[idx]._cid;   // 云端主键必须跟着走
         if (list[idx]._by) record._by = list[idx]._by;
+        /* V3-2：窗体未给年月时继承旧值（同 id/ts/_cid/_by 的继承模式）。
+           注意 examYm 是用户可编辑字段：只有当新记录确实没带时才继承，
+           否则「改年月」会被旧值覆盖（V-E2 / V-B3 会失效）。 */
+        if (record.examYm === undefined && list[idx].examYm !== undefined) {
+          record.examYm = list[idx].examYm;
+        }
         list[idx] = record;
         Store.save();
         return { mode: 'update', record: record, clamped: clamped };
