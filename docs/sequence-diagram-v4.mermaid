@@ -1,0 +1,96 @@
+%% ============================================================================
+%% ARCH v4 · 程序调用流程时序图（客户意向程度 + 结停课资源）
+%% 与 docs/ARCH-v4-customer-intent-stopres.md §4.1 / §4.2 / §4.3 逐字一致
+%% 本文件含 3 个彼此独立、均可单独渲染的 sequenceDiagram 段：
+%%   §4.1 主时序：新增结停课资源 → 归一 → 写穿 → 刷新 → 渲染
+%%   §4.2 切换类型 → 会话内保留 → 保存归一（V-C3 / V-C4）
+%%   §4.3 意向程度：新增 / 编辑 /「未填写」筛选
+%% 单图渲染工具请分别取用其中一段；勿把三段粘成同一张图。
+%% ============================================================================
+
+%% ---------- §4.1 主时序：新增结停课资源 → 归一 → 写穿 → 刷新 → 渲染 ----------
+sequenceDiagram
+  autonumber
+  actor A as 管理员
+  participant V as StopResTab / openStopForm
+  participant C as App.StopResCore
+  participant P as App.Perm
+  participant DB as App.DB.table('stop_resources')
+  participant G as 云端 / 假云端
+  participant R as ModuleCustomers.render
+
+  A->>V: 点「新增结停课资源」
+  V->>P: assertWrite('customers')
+  alt 非管理员 / readonly
+    P--xV: false + Toast「无操作权限」
+  else 允许
+    V->>V: UI.formModal（5 分区，resource_type 联动）
+    A->>V: 选「退费资源」并填写（可来回切类型，值不清空）
+    V->>V: syncVisibility(type)：hidden + disabled
+    A->>V: 提交（onSubmit）
+    V->>C: normalize(form) 按当前类型归一写 '' / false / null
+    C-->>V: form'
+    V->>C: validate(form')（只校验当前类型字段）
+    alt 校验失败
+      C--xV: {ok:false, errors}
+      V->>V: 红字第一条 + focus() + 返回 false（不关窗）
+    else 通过
+      V->>DB: insert(form')
+      DB->>P: assertWrite('customers')（网关第二道）
+      DB->>DB: pick() 剥 id/owner_id/owner_name + 写 created_at/last_editor
+      DB->>G: insert(...).select()
+      alt 成功
+        G-->>DB: row
+        DB->>DB: upsertCache + emit('') → refreshAll()
+        DB-->>V: resolve
+        V->>V: Toast('结停课资源已新增') + close()
+        DB->>R: repaint() → renderStop()
+        R->>C: filterRows(rows, filters) + sortRows()
+        C-->>R: 有序列表
+        R-->>A: Tab③ 表格（10 列，客户列表行数不变）
+      else 失败
+        G--xDB: error
+        DB->>DB: 入 retry 队列
+        DB--xV: reject → Toast('保存失败：…')，弹窗不关闭
+      end
+    end
+  end
+
+%% ---------- §4.2 切换类型 → 会话内保留 → 保存归一（V-C3 / V-C4） ----------
+sequenceDiagram
+  autonumber
+  actor A as 管理员
+  participant F as 表单 DOM
+  participant C as App.StopResCore
+  participant DB as App.DB
+  A->>F: 选「退费资源」，填 refund_amount=3000 / refund_reason=X
+  A->>F: 切「未续费资源」
+  F->>F: syncVisibility：退费专属字段 hidden+disabled（**值保留**）
+  A->>F: 切回「退费资源」
+  F-->>A: 3000 / X 仍在（V-C3）
+  A->>F: 直接改「未续费资源」并填写 nonrenew_reason / end_subjects 后提交
+  F->>C: normalize(form) → 退费专属列写 '' / false / null
+  C->>C: validate 只校验未续费字段（不报「退费金额必填」）
+  C-->>F: form'
+  F->>DB: update(id, form')
+  DB->>DB: pick 保留 null 键 → 云端退费列被清空
+  DB-->>A: 刷新后详情不显示陈旧退费值（V-C4）
+
+%% ---------- §4.3 意向程度：新增 / 编辑 /「未填写」筛选 ----------
+sequenceDiagram
+  autonumber
+  actor A as 管理员
+  participant L as Tab① 客户列表
+  participant K as App.CustomersCore
+  participant DB as App.DB.table('customers')
+  A->>L: 打开「新增客户」，意向与跟进区首项「意向程度 *」
+  A->>L: 不选直接提交
+  L->>K: validate(form)
+  K--xL: errors.intent_level = '请选择意向程度'
+  L->>L: 红字 + focus(下拉)，阻止保存（V-A2）
+  A->>L: 选「高」提交 → insert(intent_level='高')
+  DB-->>L: 刷新后列表 chip「高」/ 详情「高」/ 编辑回显「高」（V-A3）
+  A->>L: 筛选选「未填写」(哨兵 __blank__)
+  L->>K: filterRows(rows, filters, range)
+  K->>K: 特判 __blank__：命中 '' / null / 非 INTENT_LEVELS 值
+  K-->>L: 2 行（V-A5）

@@ -180,6 +180,17 @@
     return isNaN(d.getTime()) ? null : d.toISOString();
   }
 
+  /** v4：ISO 时间戳 → 本地年月 'YYYY-MM'（月份筛选 / 分组展示用）。
+   *  禁止 iso.slice(0,7)：fromDateInput 把本地 2026-03-01 00:00 存成 UTC 2026-02-28T16:00Z，
+   *  slice 会错判成 2026-02。必须用本地 getter 还原用户所在时区的年月。 */
+  function localYm(iso) {
+    if (iso === null || iso === undefined || iso === '') return '';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    var mm = d.getMonth() + 1;
+    return d.getFullYear() + '-' + (mm < 10 ? '0' + mm : String(mm));
+  }
+
   var WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
   /** 星期数字（1=周一 … 7=周日）→ 中文 */
@@ -218,6 +229,12 @@
     { value: 'low', label: '低', chip: 'ch-blue' }
   ];
   var STAGES = ['A', 'B', 'C', 'D'];   /* T9 起连报方案改为价目表内的自定义方案（plan_name），旧的 PLANS 枚举已废弃移除 */
+
+  /* v4：客户意向程度（中文值）——customers.intent_level 与 stop_resources.followup_intent 共用。
+     与 PRIORITY（英文 high/mid/low、高→低序）值集与顺序都不同，禁止改名或复用。 */
+  var INTENT_LEVELS = ['低', '中', '高'];
+  /* v4：结停课资源类型——与 customers 的 RESOURCE_TYPES（7 项客户来源）值域完全不同，禁止复用。 */
+  var STOP_RESOURCE_TYPES = ['退费资源', '未续费资源'];
 
   function options(list) {
     return (list || []).map(function (x) {
@@ -691,6 +708,7 @@
     toLocalInput: toLocalInput,
     fromLocalInput: fromLocalInput,
     fromDateInput: fromDateInput,
+    localYm: localYm,
     WEEKDAYS: WEEKDAYS,
     weekdayName: weekdayName,
     scheduleText: scheduleText,
@@ -703,6 +721,8 @@
     CLASS_TYPES: CLASS_TYPES,
     PRIORITY: PRIORITY,
     STAGES: STAGES,
+    INTENT_LEVELS: INTENT_LEVELS,
+    STOP_RESOURCE_TYPES: STOP_RESOURCE_TYPES,
     options: options,
     optionsWithLabel: optionsWithLabel,
     /* 展示件 */

@@ -152,6 +152,8 @@ function baseForm() {
   return {
     stu_name: '张小明', school: '实验中学', phone: '13800138000', grade: '高一',
     resource_type: '上门咨询', created_at: ts(2026, 11, 1, 9),
+    /* v4：意向程度为新增必填字段，合法表单夹具同步补齐（R1：新增/编辑强制必选） */
+    intent_level: '高',
     intended_product: '一对一', intended_subjects: ['数学', '英语'],
     appointment_at: null, visited: false, visit_at: null,
     test_status: '未测评', suggested_class_type: '',
@@ -163,6 +165,13 @@ function baseForm() {
 }
 
 eq('合法表单通过（13800138000）', CC.validate(baseForm()).ok, true);
+/* v4：意向程度新增必填契约（存量空串编辑时强制补选，不算批量回填） */
+const fi1 = baseForm(); delete fi1.intent_level;
+ok('v4 缺 intent_level → 拒', CC.validate(fi1).ok === false && !!CC.validate(fi1).errors.intent_level);
+const fi2 = baseForm(); fi2.intent_level = '';
+ok('v4 intent_level 空串 → 拒', CC.validate(fi2).ok === false && !!CC.validate(fi2).errors.intent_level);
+const fi3 = baseForm(); fi3.intent_level = '特高';
+ok('v4 intent_level 非枚举值 → 拒', CC.validate(fi3).ok === false && !!CC.validate(fi3).errors.intent_level);
 const f2 = baseForm(); f2.phone = '1234567';
 ok('电话 1234567 被拒', CC.validate(f2).ok === false && !!CC.validate(f2).errors.phone);
 const f3 = baseForm(); f3.phone = '0755-12345678';

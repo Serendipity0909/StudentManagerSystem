@@ -377,10 +377,10 @@ ok('App.DB 拒绝注册 score_records', threw.indexOf('sync.js') >= 0, threw);
 threw = '';
 try { App.DB.define('user_profiles', {}); } catch (e) { threw = e.message; }
 ok('App.DB 拒绝注册 user_profiles', threw.indexOf('sync.js') >= 0, threw);
-ok('App.DB 已注册 7 张新表',
-  ['students', 'classes', 'class_members', 'customers', 'daily_tasks', 'contract_prices', 'contracts']
+ok('App.DB 已注册 8 张新表',
+  ['students', 'classes', 'class_members', 'customers', 'daily_tasks', 'contract_prices', 'contracts', 'stop_resources']
     .every(function (n) { return !!App.DB.defs[n]; }));
-eq('App.DB 表数量（7 新表，不含成绩/账号）', Object.keys(App.DB.defs).length, 7);
+eq('App.DB 表数量（8 新表，不含成绩/账号）', Object.keys(App.DB.defs).length, 8);
 ok('App.DB.table 能取到网关', typeof App.DB.table('students').list === 'function');
 eq('未拉取时 list 为空数组', App.DB.table('students').list().length, 0);
 eq('App.Sync.db() 存在（sync.js 的唯一侵入点）', typeof App.Sync.db, 'function');

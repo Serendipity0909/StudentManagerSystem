@@ -651,7 +651,7 @@
   }
 
   /* =========================================================
-   * 7 张新表的集中注册（全 adminOnly；成绩/账号表禁止注册）
+   * 8 张新表的集中注册（全 adminOnly；成绩/账号表禁止注册）
    * ========================================================= */
   define('students', { module: 'students', unique: ['stu_name', 'school', 'grade'], label: '学生' });
   define('classes', { module: 'classes', unique: ['class_name'], label: '班级' });
@@ -667,6 +667,7 @@
      年份 + 年级 + 方案名称（云端 uk_prices_key 与之一致） */
   define('contract_prices', { module: 'contracts', unique: ['year', 'grade', 'plan_name'], label: '价目方案' });
   define('contracts', { module: 'contracts', unique: ['stu_name', 'grade'], label: '合同' });
+  define('stop_resources', { module: 'customers', unique: [], label: '结停课资源' });
 
   App.DB = {
     cache: cache,

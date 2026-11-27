@@ -1,0 +1,180 @@
+%% ARCH v4 · 数据结构与接口类图
+%% 客户意向程度 + 结停课资源（增量）
+%% ⚠ Customer 与 StopResource 之间刻意不画任何连线（R2 两表零关联）
+classDiagram
+  class Customer {
+    +bigint id
+    +text owner_id
+    +text owner_name
+    +text last_editor
+    +text stu_name
+    +text school
+    +text phone
+    +text grade
+    +text resource_type
+    +timestamptz created_at
+    +text intended_product
+    +jsonb intended_subjects
+    +timestamptz appointment_at
+    +boolean visited
+    +timestamptz visit_at
+    +text test_status
+    +text suggested_class_type
+    +boolean paid
+    +timestamptz paid_at
+    +numeric paid_amount
+    +boolean yellow_form
+    +text referral_name
+    +text referral_grade
+    +numeric referral_amount
+    +boolean referral_claimed
+    +text note_makeup
+    +text note_progress
+    +text note_relation
+    +text note_scores
+    +text note_schedule
+    +text note_other
+    +timestamptz updated_at
+    +text intent_level_NEW
+  }
+
+  class StopResource {
+    +bigint id
+    +text owner_id
+    +text owner_name
+    +text last_editor
+    +text stu_name
+    +text phone
+    +text grade
+    +text school
+    +timestamptz stop_date
+    +text resource_type
+    +text refund_reason
+    +text nonrenew_reason
+    +text refund_subjects
+    +text end_subjects
+    +text teacher
+    +text followup_intent
+    +numeric refund_amount
+    +boolean parent_confirmed
+    +boolean refund_applied
+    +timestamptz refund_apply_at
+    +boolean refund_arrived
+    +timestamptz refund_arrived_at
+    +timestamptz created_at
+    +timestamptz updated_at
+  }
+
+  class AppDB {
+    +Object defs
+    +Object cache
+    +Object roundOk
+    +Array retry
+    +define(name, opts) void
+    +table(name) TableApi
+    +refreshAll() Promise~boolean~
+    +fetchTable(name) Promise~boolean~
+    +flushRetry() Promise
+    +cleanOrphans(round) void
+    +pick(row) Object
+    +onChange(fn) void
+  }
+
+  class TableApi {
+    +list() Array
+    +get(id) Object
+    +count() number
+    +insert(row) Promise
+    +update(id, patch) Promise
+    +remove(id) Promise
+    +findBy(vals) Object
+    +uniqueOf() Array
+  }
+
+  class PermGuard {
+    +assertWrite(moduleId) boolean
+    +assertAdminWrite(moduleId) boolean
+    +allowed(mod) boolean
+    +denied(mod) boolean
+    +forbiddenCard(mod) string
+    +canEdit() boolean
+  }
+
+  class UIKit {
+    +Array GRADES
+    +Array RESOURCE_TYPES
+    +Array PRIORITY
+    +Array INTENDED_PRODUCTS
+    +Array INTENT_LEVELS_NEW
+    +Array STOP_RESOURCE_TYPES_NEW
+    +fromDateInput(v) string
+    +toLocalInput(v) string
+    +localYm(iso) string
+    +numOrNull(v) number
+    +round2(v) number
+    +formGrid(specs) string
+    +readForm(root, specs) Object
+    +formModal(opts) Object
+    +confirmDanger(html, onOk) void
+    +sortHeader(cols, key, desc) string
+    +bindSort(host, state, onChange) void
+    +empty(text, hint) string
+    +statusChip(label, tone) string
+  }
+
+  class CustomersCore {
+    +validate(form) Object
+    +filterRows(rows, filters, range) Array
+    +customerStats(rows, range) Object
+  }
+
+  class StopResCore {
+    +validate(form) Object
+    +filterRows(rows, filters) Array
+    +normalize(form) Object
+    +visibleFields(resourceType) Object
+    +localYm(iso) string
+    +sortRows(rows) Array
+  }
+
+  class ModuleCustomers {
+    +Array TABS
+    +Object state
+    +boolean adminOnly
+    +number order
+    +render() string
+    +bind(host) void
+    +rows() Array
+    +byId(id) Object
+    +resetFilters() void
+    +renderList() string
+    +renderStats() string
+    +renderStop() string
+    +openForm(existing) void
+    +openDetail(row) void
+    +confirmDel(id) void
+  }
+
+  class StopResTab {
+    +renderStopList() string
+    +bindStop(host) void
+    +openStopForm(existing) void
+    +openStopDetail(row) void
+    +confirmStopDel(id) void
+    +syncVisibility(type) void
+    +syncBoolTime(boolName, timeName) void
+  }
+
+  AppDB "1" *-- "8" TableApi : define 生成 8 张表
+  AppDB ..> Customer : CRUD（table customers）
+  AppDB ..> StopResource : CRUD（table stop_resources）
+  PermGuard ..> AppDB : insert/update/remove 前置守卫
+  PermGuard ..> ModuleCustomers : render 首行 L3 直达拦截
+  UIKit ..> ModuleCustomers : 枚举 / 表单件 / 排序 / chip
+  UIKit ..> StopResTab : 枚举 / fromDateInput / localYm
+  ModuleCustomers *-- StopResTab : 内含第 3 个 Tab（不新增 registerModule）
+  ModuleCustomers ..> CustomersCore : 调用（Tab① 列表 / Tab② 统计）
+  StopResTab ..> StopResCore : 调用（Tab③ 全链路）
+  CustomersCore ..> Customer : 纯函数只读入参，不读 App.DB / 不碰 DOM
+  StopResCore ..> StopResource : 纯函数只读入参，不读 App.DB / 不碰 DOM
+  %% R2：Customer ⟷ StopResource 之间无任何连线 / 无 JOIN / 无外键 / 无查重 / 无自动同步

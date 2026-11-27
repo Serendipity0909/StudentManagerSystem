@@ -21,7 +21,7 @@ const vm = require('vm');
 
 const SRC = path.join(__dirname, '..', 'js');
 const TABLES = ['students', 'classes', 'class_members', 'customers', 'daily_tasks',
-  'contract_prices', 'contracts'];
+  'contract_prices', 'contracts', 'stop_resources'];
 
 /* ---------------- 断言框架 ---------------- */
 let pass = 0, fail = 0;
@@ -219,7 +219,7 @@ async function main() {
    * 0. 边界：表定义 / 分页常量 / 列声明
    * ========================================================= */
   console.log('\n=== 0. 表定义与边界 ===');
-  eq('注册了 7 张表', Object.keys(DB.defs).length, 7);
+  eq('注册了 8 张表', Object.keys(DB.defs).length, 8);
   ok('score_records 仍未注册（归 sync.js 独占）', DB.defs.score_records === undefined);
   eq('class_members 的幂等戳列是 joined_at', DB.defs.class_members.createdCol, 'joined_at');
   eq('class_members 没有 updated 列', DB.defs.class_members.updatedCol, '');
@@ -457,6 +457,57 @@ async function main() {
   threw = false;
   try { DB.define('user_profiles', {}); } catch (e) { threw = true; }
   ok('注册 user_profiles 抛错', threw);
+
+  /* =========================================================
+   * 8. V4-1 防回归护栏（ARCH §1.3 / C-1）：
+   *    R4 阶段生产库不建表，假云端对 stop_resources 的 select 会抛错。
+   *    js/db.js 的 fetchTable 已内建单表容错（.catch → return false），
+   *    本断言只加保护，严禁收窄 / 移除该 catch。
+   *    断言：① refreshAll 仍 resolve；② 其余 7 表 roundOk 仍全 true；
+   *          ③ customers 数据完整；④ 不触发 cleanOrphans 误删。
+   * ========================================================= */
+  console.log('\n=== 8. V4-1 防回归：stop_resources 单表失败不阻断其余 7 表 ===');
+  resetCloud();
+  newAccount('18700000007');
+  cloud.rows.students = [{ id: 1, stu_name: '张三' }];
+  cloud.rows.classes = [{ id: 10, class_name: '一班' }];
+  cloud.rows.class_members = [{ id: 100, class_id: 10, student_id: 1 }];  // 合法关联，非孤儿
+  cloud.rows.customers = [
+    { id: 1, cust_name: '甲公司' },
+    { id: 2, cust_name: '乙公司' }
+  ];
+  cloud.failSelect.stop_resources = true;   // 模拟 R4 生产库未建表 / PGRST205
+  newRound();
+
+  var refreshErr = null;
+  try { await DB.refreshAll(); } catch (e) { refreshErr = e; }
+  ok('① stop_resources 拉取失败时 refreshAll() 仍 resolve（不 reject）',
+    refreshErr === null, refreshErr ? String(refreshErr) : '');
+  ok('失败表 roundOk.stop_resources 未被置 true',
+    DB.roundOk.stop_resources !== true, String(DB.roundOk.stop_resources));
+
+  var otherTables = TABLES.filter(function (t) { return t !== 'stop_resources'; });
+  ok('② 其余 7 张表 roundOk 仍全为 true',
+    otherTables.every(function (t) { return DB.roundOk[t] === true; }),
+    JSON.stringify(otherTables.map(function (t) { return t + '=' + DB.roundOk[t]; })));
+
+  var custList = DB.table('customers').list();
+  ok('③ App.DB.table("customers").list() 数据完整（2 行）',
+    custList.length === 2 &&
+    custList.some(function (r) { return r.cust_name === '甲公司'; }) &&
+    custList.some(function (r) { return r.cust_name === '乙公司'; }),
+    JSON.stringify(custList));
+
+  ok('④ 不触发 cleanOrphans 误删（云端删除调用 = 0）',
+    cloud.deleteCalls.length === 0, JSON.stringify(cloud.deleteCalls));
+  ok('④ 合法关联桥表行仍在缓存（未被误删）',
+    DB.cache.class_members.length === 1 &&
+    String(DB.cache.class_members[0].id) === '100',
+    JSON.stringify(DB.cache.class_members));
+
+  /* 复位：撤销失败注入并整体复位假云端，保证本断言可重复运行、不污染后续断言 */
+  cloud.failSelect.stop_resources = false;
+  resetCloud();
 
   /* ---------------- 汇总 ---------------- */
   console.log('\n----------------------------------------');
