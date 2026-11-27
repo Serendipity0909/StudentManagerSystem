@@ -10,7 +10,7 @@
  *        js/module-customers.js 六纯函数 + 三分支 + 意向程度 + Tab③；
  *      · 两表零关联（无 JOIN / FK / 转客户 / 同步 / 查重按钮）；
  *      · docs/ddl-v4-*.sql 的 V-G1 静态核对 7 项（只写不执行）；
- *      · README 的 R4 状态与「上线前先执行 DDL」声明；
+ *      · README 的 R4 已上线状态与「重建环境须先执行 DDL」声明；
  *      · 构建产物：index.html 版本号一致、单文件版内联了 v4 代码。
  *   B. 全量回归汇总：spawnSync 依次执行 v4 两个专项 + v2/v3 顶层套件，
  *      收集 rc 与末行 PASS/FAIL；任一 rc≠0 或末行 FAIL>0 计入失败。
@@ -193,10 +193,11 @@ ok('⑦ COMMENT 含「零关联」且每个 DO 块幂等',
 section('A5 R4 边界与构建产物');
 ok('README 含 intent_level / stop_resources 说明',
   /intent_level/.test(readme) && /stop_resources/.test(readme));
-ok('README 含「上线前先执行 DDL」与 R4 本地实现状态',
-  /上线前.*DDL|DDL.*上线前/.test(readme) && /R4|本地实现/.test(readme));
-ok('README / 代码均未声明「已执行生产 DDL」',
-  !/已执行生产 DDL|生产 DDL 已执行/.test(readme) && !/已执行生产 DDL/.test(customers));
+ok('README 含「重建环境须先执行 DDL」与 R4 已上线状态',
+  /重建环境|迁移新库/.test(readme) && /DDL/.test(readme) &&
+  /R4/.test(readme) && /已发布上线|已上线/.test(readme));
+ok('README 声明生产 DDL 已执行且代码库已同步',
+  /生产 DDL 已执行|DDL 已执行/.test(readme) && /55e969c/.test(readme));
 const versions = [];
 indexHtml.replace(/\?v=(\d{12})/g, function (m, d) { versions.push(d); return m; });
 ok('index.html 本地资源版本号一致（≥24 处同戳）',

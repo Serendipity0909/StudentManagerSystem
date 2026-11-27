@@ -5,8 +5,8 @@
 | 版本 | v4 增量（客户管理 Tab① 意向程度 + Tab③ 结停课资源） |
 | 报告日期 | 2026-11-27 |
 | 权威契约 | `docs/ARCH-v4-customer-intent-stopres.md`（686 行）、`docs/PRD-v4-customer-intent-stopres.md`（499 行） |
-| 交付边界 | **R4 = 先本地实现 + 全量测试**；生产 DDL 未执行、未发布上线、未 commit/push |
-| 结论 | **本地功能已完整落地并通过全量回归**；上线前须用户确认后执行 DDL + 发布 |
+| 交付边界 | R4 原为「先本地实现 + 全量测试」；用户 2026-11-27 明确授权后，**生产 DDL 已执行、已发布上线、已 commit/push**（见 §9） |
+| 结论 | **IS_PASS: YES**：本地功能、生产库、线上版本、GitHub 仓库四端一致，v2/v3/v4 全量回归 0 失败 |
 
 ---
 
@@ -60,11 +60,11 @@ git status: 仅 5 个 ?? docs/*v4* 文档，HEAD = 1be52ff（v3）
 |---|---|
 | `docs/PRD-v4-customer-intent-stopres.md` | PM 交付（499 行，22 需求池 / 25 字段定义 / 38 验收 / 6 OQ / 3 冲突点） |
 | `docs/ARCH-v4-customer-intent-stopres.md` | 架构交付（686 行，唯一实现契约，IS_PASS: YES） |
-| `docs/ddl-v4-customer-intent-stopres.sql` | 云端 DDL（**只写不执行**）：24 列、4 RLS policy、2 GRANT + 序列 USAGE、5 个幂等 DO 块、无 UNIQUE/INDEX/FK |
+| `docs/ddl-v4-customer-intent-stopres.sql` | 云端 DDL：24 列、4 RLS policy、2 GRANT + 序列 USAGE、5 个幂等 DO 块、无 UNIQUE/INDEX/FK；**已于 2026-11-27 在生产库执行并验证**（见 §9.2） |
 | `docs/class-diagram-v4.mermaid` / `docs/sequence-diagram-v4.mermaid` | 类图 / 时序图 |
-| `README.md` | 新增 v4 章节（含 R4 状态与「**上线前必须先执行 DDL**」警告） |
-| `index.html` | 24 个本地资源统一 `?v=202611271856`（缓存击穿） |
-| `学生管理系统-单文件版.html` | 重打包，773931 bytes（v3 为 737172），已内联全部 v4 代码 |
+| `README.md` | 新增 v4 章节；R4 状态已更新为「DDL 已执行、已上线」，并保留「重建环境须先执行 DDL」提示 |
+| `index.html` | 24 个本地资源统一 `?v=202611271940`（缓存击穿；本地实现阶段曾为 `202611271856`） |
+| `学生管理系统-单文件版.html` | 重打包，773931 bytes（约 755.8 KB；v3 为 737172），已内联全部 v4 代码 |
 
 ---
 
@@ -102,9 +102,9 @@ git status: 仅 5 个 ?? docs/*v4* 文档，HEAD = 1be52ff（v3）
 
 > **发现的唯一真实回归**：给 `CustomersCore.validate` 加 `intent_level` 必选后，`smoke-v2-customer-task.js` 4 条断言 FAIL（旧「合法表单」夹具缺该字段）。按 R1 裁决**更新夹具而非放宽校验**，复跑 103/0、`qa-v3` 219/0 全恢复。这是预期的功能变更影响，不是产品缺陷。
 
-### 4.1 DDL 静态核对（V-G1，7/7 全过；仅 Read + Grep，未执行任何 SQL）
+### 4.1 DDL 静态核对（V-G1，7/7 全过；上线前的只读核对记录）
 
-① `customers` 既有列零改写（仅 1 条 `ADD COLUMN IF NOT EXISTS intent_level`、无 `UPDATE … SET` 回填）；② `stop_resources` 恰好 24 列、列名/类型/NOT NULL/DEFAULT 与 §2.2 一致；③ 除主键外无 UNIQUE / INDEX / FOREIGN KEY；④ 4 条 RLS policy 名称与 `is_viewer()`/`is_editor()` 一致；⑤ GRANT 2 行 + 序列 USAGE 齐全；⑥ COMMENT 含「零关联」；⑦ 5 个 `DO $ddl$` 块各自幂等（首次执行须按 ①→②→③④⑤ 对象依赖顺序）。
+① `customers` 既有列零改写（仅 1 条 `ADD COLUMN IF NOT EXISTS intent_level`、无 `UPDATE … SET` 回填）；② `stop_resources` 恰好 24 列、列名/类型/NOT NULL/DEFAULT 与 §2.2 一致；③ 除主键外无 UNIQUE / INDEX / FOREIGN KEY；④ 4 条 RLS policy 名称与 `is_viewer()`/`is_editor()` 一致；⑤ GRANT 2 行 + 序列 USAGE 齐全；⑥ COMMENT 含「零关联」；⑦ 5 个 `DO $ddl$` 块各自幂等（首次执行须按 ①→②→③④⑤ 对象依赖顺序）。生产库实际执行结果见 §9.2。
 
 ### 4.2 单文件版端到端冒烟
 
@@ -142,19 +142,21 @@ validate 未续费合法 = true
 
 ---
 
-## 6. R4 边界（红线，未越界）
+## 6. R4 边界与解除记录
+
+**上线前（本轮实现阶段）**，R4 红线全部保持，未越界：
 
 - ✅ 未执行任何生产 DDL（`customers` 加列、`stop_resources` 建表均未做）
 - ✅ 未连生产库、未跑生产回填
-- ✅ 未发布上线（线上仍是 v3，`?v=202611201518`）
+- ✅ 未发布上线（当时线上仍是 v3，`?v=202611201518`）
 - ✅ 未 git commit / push
 - ✅ 未改 `Tab② 统计分析` 口径、未改成绩 26 列导出与 v3 考试年月排序
 
-### 上线前必做（须用户单独确认）
+**用户明确授权后**（`很好，帮我发布上线吧；git同步更新代码库`），R4 挂起事项已全部执行完毕，实际结果见 §9。以下原「上线前必做」三项均已闭环：
 
-1. 执行 `docs/ddl-v4-customer-intent-stopres.sql`（幂等分块，按 ①→②→③④⑤ 顺序）：`customers ADD COLUMN intent_level` + `CREATE TABLE stop_resources` + RLS / GRANT / COMMENT。
-2. **若不先执行 DDL**：线上打开页面时 `stop_resources` 拉取会失败（单表容错保证其余 7 表正常），Tab③ 显示空态、写入进入重试队列；客户列表因缺 `intent_level` 列也可能异常。
-3. 确认 DDL 生效后 `python3 build-single.py`，再发布线上并做人工走查。
+1. ✅ 已按 ①→②→③→④→⑤ 顺序执行 5 个幂等 DDL 块，并做生产库权威复核。
+2. ✅ 已先确认 DDL 生效（表/列/RLS/policy/GRANT/序列/COMMENT/存量零改写），再刷新构建产物，避免线上空态。
+3. ✅ 已 `python3 build-single.py`、`workbuddy_sites_deploy` 发布，并完成线上逐项验证与 git 同步。
 
 ---
 
@@ -162,12 +164,65 @@ validate 未续费合法 = true
 
 - `ARCH-v4` / `PRD-v4` / 本报告引用了 `docs/backup-pre-v3.json` 等 v3 回滚底稿路径；这些底稿因含内部标识被 `.gitignore` 排除在公开仓库之外，本地与线上发布目录仍保留，不影响功能与运行。
 - 编辑存量客户时需补选意向程度（R1 直接后果，属用户主动写入，非批量回填）。
-- **`isTrue()` 与 `triState()` 真值词表不对称（QA 发现，本轮不修）**：`js/module-customers.js:85-87` 的 `isTrue` 只认 `true / 1 / 'true' / 't'`，不认中文 `'是'`；`triState`（:202-208）认 `'是' / '否' / yes / no / …`。消费方：`stopValidate`（:419/423/428）与 `stopNormalize`（:344-345）用 `isTrue`，`stopFilterRows`（:473-477）用 `triState`。**当前 UI 的 `qc()` 从 checkbox 产真布尔，生产路径不受影响，故非 bug**；仅当未来接入外部数据源（CSV 导入、其它客户端写库）把布尔列写成字符串 `'是'` 时，筛选能命中但条件必填校验 / 布尔否→时间归 null 不会触发。QA 已在 §4 用一条断言固化该真实行为避免误判。**后续改进建议**：把 `isTrue` 扩展到 `'是'`（及 `'yes'`），或统一抽 `boolOf()` 供校验/归一/筛选共用，消除两套词表。本轮按 R4 不做范围外改动。
+- **`isTrue()` 与 `triState()` 真值词表不对称（QA 发现，本轮不修）**：`js/module-customers.js:85-87` 的 `isTrue` 只认 `true / 1 / 'true' / 't'`，不认中文 `'是'`；`triState`（:202-208）认 `'是' / '否' / yes / no / …`。消费方：`stopValidate`（:419/423/428）与 `stopNormalize`（:344-345）用 `isTrue`，`stopFilterRows`（:473-477）用 `triState`。**当前 UI 的 `qc()` 从 checkbox 产真布尔，生产路径不受影响，故非 bug**；仅当未来接入外部数据源（CSV 导入、其它客户端写库）把布尔列写成字符串 `'是'` 时，筛选能命中但条件必填校验 / 布尔否→时间归 null 不会触发。QA 已在 §4 用一条断言固化该真实行为避免误判。**后续改进建议**：把 `isTrue` 扩展到 `'是'`（及 `'yes'`），或统一抽 `boolOf()` 供校验/归一/筛选共用，消除两套词表。本轮不做范围外改动。
 
 ---
 
 ## 8. 结论
 
-**IS_PASS: YES（本地实现 + 全量测试）**。v4 需求的用户原始 16 个字段与全部业务逻辑均已落地，`qa-v4.js` 静态契约 47/0、v4 专项与独立复核全绿、v2/v3 全量回归 0 失败、构建产物已刷新并内联 v4 代码。
+**IS_PASS: YES（本地实现 + 全量测试 + 生产上线 + 代码同步）**。v4 需求的用户原始 16 个字段与全部业务逻辑均已落地，`qa-v4.js` 主集成门 50/0、三层专项 361/334/61 全绿、v2/v3 全量回归 0 失败、子套件 PASS 合计 2276；生产 DDL 已执行、线上 24 个资源与本地 md5 全匹配、GitHub `main` 已同步至 `55e969c`。
 
-**待用户确认**：生产 DDL 执行与发布上线。
+原「待用户确认」事项已由用户明确授权并执行完毕，详见 §9。
+
+---
+
+## 9. 上线与代码同步记录（2026-11-27）
+
+### 9.1 发布前基线
+
+| 项 | 值 |
+|---|---|
+| 线上入口 | `https://student-scores-36336.app.workbuddy.host/?sharecode=…`（覆盖同一应用 `wbapp_4awyu0XEG4n9gJgerWLkYW`，未新建） |
+| 发布前线上版本号 | `?v=202611201518`（v3），v4 符号命中 0 |
+| 本地最终版本号 | `?v=202611271940`（24 个本地资源同戳） |
+| `js/` 冻结双采样 | 两次 `md5` 聚合均为 `9bd48bae8f6e04c68e0d969a412870f3`，确认无并发写入 |
+| 单文件版 | 773931 bytes，内联 `App.StopResCore` / `stop_resources` / `③ 结停课资源` / `intent_level` / `localYm` |
+| 验收门 | `TZ=Asia/Shanghai node tools/qa-v4.js` → `PASS 50 / FAIL 0`，子套件合计 2276 |
+
+### 9.2 生产 DDL 执行与复核
+
+按脚本 5 个幂等 `DO $ddl$` 块顺序执行（`mode=migrate`）：① `customers ADD COLUMN IF NOT EXISTS intent_level`；② `CREATE TABLE stop_resources`（24 列）；③ 4 条 RLS policy；④ GRANT + 序列 USAGE；⑤ COMMENT。
+
+权威复核 SQL（单条只读）返回：
+
+```json
+[{"customers_rows":0,"has_intent":1,"intent_nonblank":0,"policies":4,"rls_on":true,"stop_cols":24,"stop_rows":0}]
+```
+
+即：`stop_resources` 24 列、`customers.intent_level` 已加、`rowsecurity=true`、4 条 policy、两表 0 行且存量 `intent_level` 无回填 —— **存量数据零改写**。另经 `pg_tables` 复核 `customers` / `stop_resources` 均 `rowsecurity=true`（`describe_table` 的 `RLSOn` 字段曾误报 false，已排除）。
+
+### 9.3 发布与线上验证
+
+`workbuddy_sites_deploy`（`action=deploy`、`directory=学生管理系统`、`language=static`、`entryHtml=index.html`、`appId=wbapp_4awyu0XEG4n9gJgerWLkYW`、`domainPrefix=student-scores`、`userAskedToPublish=true`）→ `verified:true`、`deployedAs:web-page`，**覆盖同一链接，未新建应用**。
+
+| 验证项 | 结果 |
+|---|---|
+| 线上入口 | HTTP 200 |
+| 线上 `index.html` 版本号 | `?v=202611271940` |
+| 本地 vs 线上 `index.html` md5 | `2508907dca6d03c253cbb52336eff391` 双向一致 |
+| 24 个本地资源 | HTTP 200 = 24，md5 与本地一致 = 24（**全匹配**） |
+| 线上 `module-customers.js` v4 符号 | `App.StopResCore` 6 / `stop_resources` 2 / `③ 结停课资源` 4 / `intent_level` 20 / `localYm` 4 |
+
+> 探测静态资源时版本号须用 `?v=<stamp>&sharecode=<code>` 拼接；误用第二个 `?` 会污染 sharecode 导致 403（v3 阶段已固化的经验）。
+
+### 9.4 GitHub 同步
+
+| 项 | 结果 |
+|---|---|
+| commit | `55e969c`（19 files changed, +5521 / −37） |
+| push | `1be52ff..55e969c  main -> main` |
+| 远端 HEAD | `55e969c9e0dcad34ab9ed772bed5796a629ad9b0` |
+| 远端 tree | `truncated:false`，72 个文件；13 个关键文件全部存在，抽样 blob sha 与本地**全部一致** |
+| 脱敏 | `docs/backup-pre-v3.json`、`docs/v3-postflight-snapshot.json`、`.workbuddy/` 均被 `.gitignore` 排除，远端不存在；新增文件命中的手机号全为标准测试假号（13400134000 / 1380013800x / 13900139000 等），真实凭据 / sharecode 0 命中 |
+
+> 公开仓库中 `wbapp_` 应用 ID 仅存在于 HEAD 历史已跟踪文件（`baseline-score*.txt`、`QA-v2-recheck.md`、`QA-v3-report.md`），本轮未修改这些文件，按历史公开口径保留。

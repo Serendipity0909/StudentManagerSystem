@@ -79,8 +79,8 @@
 - **条件联动**：切换资源类型时只隐藏另一类型专属字段（会话内不清空，切回可恢复），提交时统一归一为空串 / `false` / `null`，不会残留跨类型脏值。
 - **Tab② 统计分析口径不变**：意向程度与结停课资源均不进入统计、不进入成绩 26 列导出。
 
-> ⚠️ **R4 交付状态（当前）**：本版为「先本地实现 + 全量测试」，生产数据库**尚未执行** `docs/ddl-v4-customer-intent-stopres.sql`、也**未发布上线**。
-> **上线前必须先执行 DDL**（`customers` 加 `intent_level` 列 + 建 `stop_resources` 表 + RLS / GRANT），否则线上打开页面时该表拉取会失败、Tab③ 显示空态、写入会进入重试队列。DDL 脚本为幂等的分块 `DO $ddl$`，可逐块执行；确认 DDL 生效后再 `python3 build-single.py` 并发布。生产 DDL 与发布须单独确认后执行。
+> ✅ **R4 交付状态（当前，2026-11-27）**：用户已明确授权并全部执行完毕 —— 生产 DDL 已执行并验证、站点已发布上线、代码已同步至 GitHub `main`（`55e969c`）。线上资源版本 `?v=202611271940`，24 个本地资源与本地 md5 全匹配。
+> **重建环境 / 迁移新库时仍须先执行 DDL**：`docs/ddl-v4-customer-intent-stopres.sql`（`customers` 加 `intent_level` 列 + 建 `stop_resources` 表 + RLS / GRANT / COMMENT）。若目标库缺表缺列，线上打开页面时该表拉取会失败、Tab③ 显示空态、写入会进入重试队列（`db.js` 单表容错保证其余 7 表正常）。DDL 脚本为幂等的分块 `DO $ddl$`，按 ①→②→③→④→⑤ 顺序逐块执行；确认生效后再 `python3 build-single.py` 并发布。
 
 ## 文件说明
 
